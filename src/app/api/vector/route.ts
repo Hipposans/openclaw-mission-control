@@ -203,12 +203,30 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ results: [], query });
       }
 
-      const data = await gatewayMemorySearch({
-        query: query.trim(),
-        agent: agent || undefined,
-        maxResults: parseInt(maxResults, 10) || 10,
-        minScore: minScore || undefined,
-      });
+      // Try gateway tool first; fall back to CLI if the tool isn't registered
+      let data: { results: SearchResult[] };
+      try {
+        data = await gatewayMemorySearch({
+          query: query.trim(),
+          agent: agent || undefined,
+          maxResults: parseInt(maxResults, 10) || 10,
+          minScore: minScore || undefined,
+        });
+      } catch (gwErr) {
+        const is404 = gwErr instanceof Error && gwErr.message.includes("(404)");
+        if (!is404) throw gwErr;
+
+        const bin = await getOpenClawBin();
+        const args = ["memory", "search", query.trim(), "--json", "--max-results", String(parseInt(maxResults, 10) || 10)];
+        if (agent) args.push("--agent", agent);
+        if (minScore) args.push("--min-score", minScore);
+        const { stdout } = await exec(bin, args, {
+          timeout: 30000,
+          env: { ...process.env, NO_COLOR: "1" },
+        });
+        const parsed = JSON.parse(stdout || "{}") as { results?: SearchResult[] };
+        data = { results: Array.isArray(parsed.results) ? parsed.results : [] };
+      }
 
       const results = (data.results || []).map((r) => ({
         ...r,
