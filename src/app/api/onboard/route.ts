@@ -594,9 +594,12 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 3. Set gateway mode to local
+        // 3. Set gateway mode to local and explicitly set auth mode to token
+        //    (v2026.3.7+ requires explicit gateway.auth.mode when both token
+        //    and password are configured — setting it upfront prevents breakage)
         try {
           await ensureConfigValue(home, "gateway.mode", "local");
+          await ensureConfigValue(home, "gateway.auth.mode", "token");
         } catch {
           // non-fatal
         }
