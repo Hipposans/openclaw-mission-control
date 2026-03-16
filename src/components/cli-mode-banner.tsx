@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { X, TriangleAlert } from "lucide-react";
 import { useGatewayStatusStore } from "@/lib/gateway-status-store";
 
@@ -16,13 +16,10 @@ const DISMISS_KEY = "cli-mode-banner-dismissed";
  */
 export function CliModeBanner() {
   const { transport, initialCheckDone } = useGatewayStatusStore();
-  const [dismissed, setDismissed] = useState(true); // default true to avoid flash
-
-  // Initialise dismissed state from sessionStorage after mount
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setDismissed(sessionStorage.getItem(DISMISS_KEY) === "1");
-  }, []);
+  const [dismissed, setDismissed] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return sessionStorage.getItem(DISMISS_KEY) === "1";
+  });
 
   const handleDismiss = useCallback(() => {
     try {
@@ -44,11 +41,11 @@ export function CliModeBanner() {
     >
       <TriangleAlert className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
       <p className="flex-1 text-xs font-medium">
-        Running in CLI fallback mode &mdash; set{" "}
+        Running in CLI fallback mode &mdash; HTTP transport is currently unavailable. Check Gateway connectivity or set{" "}
         <code className="rounded bg-amber-400/20 px-1 py-0.5 font-mono text-[11px]">
-          OPENCLAW_GATEWAY_TOKEN
+          OPENCLAW_TRANSPORT=http
         </code>{" "}
-        for better performance
+        on stable VPS setups.
       </p>
       <button
         type="button"

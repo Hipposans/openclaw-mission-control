@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGatewayUrl } from "@/lib/paths";
+import { resolveTransport } from "@/lib/openclaw";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,8 @@ export async function GET() {
   const start = Date.now();
   const url = await getGatewayUrl();
   const port = parseInt(new URL(url).port, 10) || 18789;
-  const transport = process.env.OPENCLAW_TRANSPORT || "auto";
+  const transportConfigured = process.env.OPENCLAW_TRANSPORT || "auto";
+  let transport = transportConfigured;
 
   let gateway: "online" | "offline" | "degraded" = "offline";
 
@@ -25,10 +27,17 @@ export async function GET() {
     // unreachable
   }
 
+  try {
+    transport = await resolveTransport();
+  } catch {
+    // leave configured transport as fallback
+  }
+
   return NextResponse.json({
     ok: gateway === "online",
     gateway,
     transport,
+    transportConfigured,
     port,
     timestamp: new Date().toISOString(),
     latencyMs: Date.now() - start,

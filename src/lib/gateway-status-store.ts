@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 
 export type GatewayHealth = Record<string, unknown> | null;
 export type GatewayStatus = "online" | "degraded" | "offline" | "loading";
-/** Mirrors the OPENCLAW_TRANSPORT env var returned by /api/status. */
+/** Effective runtime transport reported by /api/status (for auto: "http" or "cli"). */
 export type TransportMode = "cli" | "auto" | string | null;
 
 type Snapshot = {
@@ -12,7 +12,7 @@ type Snapshot = {
   latencyMs: number | null;
   /** True once at least one full poll cycle has completed (success or failure). */
   initialCheckDone: boolean;
-  /** Transport mode reported by /api/status — "cli" means CLI fallback is active. */
+  /** Effective transport from /api/status — "cli" means CLI fallback is active. */
   transport: TransportMode;
 };
 
