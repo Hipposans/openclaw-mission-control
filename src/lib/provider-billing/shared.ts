@@ -79,34 +79,6 @@ export const PROVIDER_BILLING_REQUIREMENTS: Record<string, ProviderBillingRequir
     docsUrl: "https://docs.anthropic.com/en/api/data-usage-cost-api",
     setupHint: "Usage/Cost Admin API requires an Anthropic admin key.",
   },
-  mistral: {
-    provider: "mistral",
-    billingMode: "invoice_api",
-    requiredCredential: "MISTRAL_API_KEY",
-    docsUrl: "https://docs.mistral.ai/api/",
-    setupHint: "Usage API can provide daily real usage when endpoint access is enabled.",
-  },
-  xai: {
-    provider: "xai",
-    billingMode: "invoice_api",
-    requiredCredential: "XAI_MANAGEMENT_KEY",
-    docsUrl: "https://docs.x.ai/developers/rest-api-reference/management/billing",
-    setupHint: "Management API usage endpoint requires management key and team id (XAI_TEAM_ID).",
-  },
-  google: {
-    provider: "google",
-    billingMode: "estimate_only",
-    requiredCredential: "GOOGLE_API_KEY",
-    docsUrl: "https://ai.google.dev/gemini-api/docs/billing",
-    setupHint: "No simple Gemini billing API for AI Studio keys; costs are estimate-only in dashboard.",
-  },
-  groq: {
-    provider: "groq",
-    billingMode: "estimate_only",
-    requiredCredential: "GROQ_API_KEY",
-    docsUrl: "https://console.groq.com/docs/billing-faqs",
-    setupHint: "No public billing API; dashboard uses local telemetry estimates.",
-  },
 };
 
 export const SUPPORTED_BILLING_PROVIDERS = Object.keys(PROVIDER_BILLING_REQUIREMENTS) as Array<
@@ -344,10 +316,6 @@ const FRESHNESS_MAX_AGE_MS: Record<string, number> = {
   openrouter: 30 * 60 * 1000,
   openai: 15 * 60 * 1000,
   anthropic: 10 * 60 * 1000,
-  google: 60 * 60 * 1000,
-  groq: 60 * 60 * 1000,
-  mistral: 15 * 60 * 1000,
-  xai: 15 * 60 * 1000,
 };
 
 function providerFreshness(provider: string, lastFetchMs: number | null): "fresh" | "stale" | "unknown" {
@@ -406,22 +374,6 @@ export async function maybeCollectProvider(
   if (provider === "openai") {
     const mod = await import("./openai");
     return mod.collectOpenAIBilling();
-  }
-  if (provider === "google") {
-    const mod = await import("./google");
-    return mod.collectGoogleBilling();
-  }
-  if (provider === "groq") {
-    const mod = await import("./groq");
-    return mod.collectGroqBilling();
-  }
-  if (provider === "mistral") {
-    const mod = await import("./mistral");
-    return mod.collectMistralBilling();
-  }
-  if (provider === "xai") {
-    const mod = await import("./xai");
-    return mod.collectXaiBilling();
   }
   const mod = await import("./anthropic");
   return mod.collectAnthropicBilling();

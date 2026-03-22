@@ -11,7 +11,7 @@ type RouteContext = {
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const { provider } = await context.params;
-    const supportedProviders = ["openrouter", "openai", "anthropic", "google", "groq", "mistral", "xai"] as const;
+    const supportedProviders = ["openrouter", "openai", "anthropic"] as const;
     type SupportedProvider = (typeof supportedProviders)[number];
     if (!supportedProviders.includes(provider as SupportedProvider)) {
       return NextResponse.json({ ok: false, error: "Unsupported provider" }, { status: 404 });
@@ -33,10 +33,6 @@ const PROVIDER_CREDENTIAL_KEYS: Record<string, string[]> = {
   openrouter: ["OPENROUTER_MANAGEMENT_KEY", "OPENROUTER_MGMT_KEY"],
   openai: ["OPENAI_ADMIN_API_KEY"],
   anthropic: ["ANTHROPIC_ADMIN_API_KEY"],
-  google: ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
-  groq: ["GROQ_API_KEY"],
-  mistral: ["MISTRAL_API_KEY"],
-  xai: ["XAI_MANAGEMENT_KEY", "XAI_TEAM_ID"],
 };
 
 async function saveEnvCredentials(values: Record<string, string>) {
@@ -47,7 +43,7 @@ async function saveEnvCredentials(values: Record<string, string>) {
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const { provider } = await context.params;
-    const supportedProviders = ["openrouter", "openai", "anthropic", "google", "groq", "mistral", "xai"] as const;
+    const supportedProviders = ["openrouter", "openai", "anthropic"] as const;
     type SupportedProvider = (typeof supportedProviders)[number];
     if (!supportedProviders.includes(provider as SupportedProvider)) {
       return NextResponse.json({ ok: false, error: "Unsupported provider" }, { status: 404 });

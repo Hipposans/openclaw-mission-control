@@ -363,17 +363,7 @@ export function getModelOptions(): { key: string; displayName: string; provider:
 export const PROVIDER_INFO: Record<string, { displayName: string; emoji: string }> = {
   anthropic: { displayName: "Anthropic", emoji: "" },
   openai: { displayName: "OpenAI", emoji: "" },
-  google: { displayName: "Google", emoji: "" },
-  groq: { displayName: "Groq", emoji: "" },
-  xai: { displayName: "xAI", emoji: "" },
-  mistral: { displayName: "Mistral", emoji: "" },
   openrouter: { displayName: "OpenRouter", emoji: "" },
-  cerebras: { displayName: "Cerebras", emoji: "" },
-  huggingface: { displayName: "Hugging Face", emoji: "" },
-  minimax: { displayName: "MiniMax", emoji: "" },
-  zai: { displayName: "ZAI", emoji: "" },
-  ollama: { displayName: "Ollama", emoji: "" },
-  lmstudio: { displayName: "LM Studio", emoji: "" },
 };
 
 const PROVIDER_DISPLAY_OVERRIDES: Record<string, string> = {

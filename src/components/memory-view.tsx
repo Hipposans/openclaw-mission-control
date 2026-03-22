@@ -99,7 +99,7 @@ function vectorBadge(entry: { vectorState?: VectorState }): {
   label: string;
   className: string;
   Icon: React.ComponentType<{ className?: string }>;
-} {
+} | null {
   switch (entry.vectorState) {
     case "indexed":
       return {
@@ -120,11 +120,8 @@ function vectorBadge(entry: { vectorState?: VectorState }): {
         Icon: CircleDashed,
       };
     default:
-      return {
-        label: "Unknown",
-        className: "border-sky-500/30 bg-sky-500/10 text-sky-300",
-        Icon: HelpCircle,
-      };
+      // No badge when state is unknown — avoids confusing users
+      return null;
   }
 }
 
@@ -1041,6 +1038,7 @@ export function MemoryView() {
                 <div className="mt-0.5 flex items-center gap-2">
                   {(() => {
                     const badge = vectorBadge(memoryMd);
+                    if (!badge) return null;
                     const Icon = badge.Icon;
                     return (
                       <span
@@ -1110,7 +1108,6 @@ export function MemoryView() {
                       const key = `workspace:${file.name}`;
                       const selectedHere = selected === key;
                       const badge = vectorBadge(file);
-                      const BadgeIcon = badge.Icon;
                       return (
                         <button
                           key={file.name}
@@ -1130,15 +1127,20 @@ export function MemoryView() {
                             </span>
                           </div>
                           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                            <span
-                              className={cn(
-                                "inline-flex items-center gap-1 rounded-full border px-1 py-0.5 text-xs font-medium",
-                                badge.className
-                              )}
-                            >
-                              <BadgeIcon className="h-2.5 w-2.5" />
-                              {badge.label}
-                            </span>
+                            {badge && (() => {
+                              const BadgeIcon = badge.Icon;
+                              return (
+                                <span
+                                  className={cn(
+                                    "inline-flex items-center gap-1 rounded-full border px-1 py-0.5 text-xs font-medium",
+                                    badge.className
+                                  )}
+                                >
+                                  <BadgeIcon className="h-2.5 w-2.5" />
+                                  {badge.label}
+                                </span>
+                              );
+                            })()}
                             <span className="text-xs text-muted-foreground/70">
                               {file.words > 0 ? `${file.words}w` : "empty"}
                               {file.mtime ? ` • ${formatAgo(file.mtime)}` : ""}
@@ -1170,7 +1172,6 @@ export function MemoryView() {
                   entry.vectorState === "not_indexed" ||
                   Boolean(entry.dirty);
                 const badge = vectorBadge(entry);
-                const BadgeIcon = badge.Icon;
 
                 return (
                   <button
@@ -1208,15 +1209,20 @@ export function MemoryView() {
                     </div>
 
                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-full border px-1 py-0.5 text-xs font-medium",
-                          badge.className
-                        )}
-                      >
-                        <BadgeIcon className="h-2.5 w-2.5" />
-                        {badge.label}
-                      </span>
+                      {badge && (() => {
+                        const BadgeIcon = badge.Icon;
+                        return (
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1 rounded-full border px-1 py-0.5 text-xs font-medium",
+                              badge.className
+                            )}
+                          >
+                            <BadgeIcon className="h-2.5 w-2.5" />
+                            {badge.label}
+                          </span>
+                        );
+                      })()}
                       {entry.dirty && (
                         <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-xs font-medium text-amber-300">
                           index dirty
@@ -1226,15 +1232,25 @@ export function MemoryView() {
                         {entry.exists ? `${entry.words}w` : "No file"} • {entry.indexedFiles ?? 0} files
                       </span>
                       {needsIndex && (
-                        <button
-                          type="button"
+                        <span
+                          role="button"
+                          tabIndex={0}
                           onClick={(ev) => {
                             ev.preventDefault();
                             ev.stopPropagation();
-                            void indexAgentMemory(entry);
+                            if (indexingFile !== key) void indexAgentMemory(entry);
                           }}
-                          disabled={indexingFile === key}
-                          className="ml-auto inline-flex items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-xs font-medium text-sky-300 hover:bg-sky-500/20 disabled:opacity-60"
+                          onKeyDown={(ev) => {
+                            if (ev.key === "Enter" || ev.key === " ") {
+                              ev.preventDefault();
+                              ev.stopPropagation();
+                              if (indexingFile !== key) void indexAgentMemory(entry);
+                            }
+                          }}
+                          className={cn(
+                            "ml-auto inline-flex cursor-pointer items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-xs font-medium text-sky-300 hover:bg-sky-500/20",
+                            indexingFile === key && "opacity-60 pointer-events-none"
+                          )}
                         >
                           {indexingFile === key ? (
                             <span className="inline-flex items-center gap-0.5">
@@ -1246,7 +1262,7 @@ export function MemoryView() {
                             <RefreshCw className="h-2.5 w-2.5" />
                           )}
                           {indexingFile === key ? "Indexing" : "Index"}
-                        </button>
+                        </span>
                       )}
                     </div>
                   </button>
@@ -1385,6 +1401,7 @@ export function MemoryView() {
                                   </span>
                                   {(() => {
                                     const badge = vectorBadge(e);
+                                    if (!badge) return null;
                                     const Icon = badge.Icon;
                                     return (
                                       <span
@@ -1430,6 +1447,7 @@ export function MemoryView() {
 
                   {detailMeta.vectorState && (() => {
                     const badge = vectorBadge({ vectorState: detailMeta.vectorState });
+                    if (!badge) return null;
                     const Icon = badge.Icon;
                     return (
                       <span

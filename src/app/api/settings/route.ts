@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runCliCaptureBoth, gatewayCall } from "@/lib/openclaw";
+import { gatewayConfigPatch } from "@/lib/gateway-config";
 
 export const dynamic = "force-dynamic";
 
@@ -95,8 +96,7 @@ export async function POST(request: NextRequest) {
             settings: { timezone: tz },
           };
 
-          await gatewayCall(
-            "config.patch",
+          await gatewayConfigPatch(
             {
               raw: JSON.stringify(patch),
               baseHash: hash,

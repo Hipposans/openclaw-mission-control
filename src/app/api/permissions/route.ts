@@ -3,6 +3,7 @@ import { writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { gatewayCall, runCli, runCliJson } from "@/lib/openclaw";
+import { gatewayConfigPatch } from "@/lib/gateway-config";
 
 export const dynamic = "force-dynamic";
 
@@ -475,13 +476,12 @@ export async function POST(request: NextRequest) {
       const enabled = Boolean(body.enabled);
       const cfg = await gatewayCall<{ hash?: string }>("config.get", undefined, 12000);
       const baseHash = String(cfg.hash || "");
-      await gatewayCall(
-        "config.patch",
+      await gatewayConfigPatch(
         {
           raw: JSON.stringify({ tools: { elevated: { enabled } } }),
           baseHash,
         },
-        12000
+        12000,
       );
       const snapshot = await readSnapshot();
       return NextResponse.json({

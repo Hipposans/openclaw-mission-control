@@ -207,6 +207,38 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ── Set fallback models ──
+      case "set-fallbacks": {
+        const fallbacks = Array.isArray(body.fallbacks)
+          ? (body.fallbacks as unknown[]).map((f) => String(f).trim()).filter(Boolean)
+          : [];
+
+        try {
+          await patchConfig({ agents: { defaults: { model: { fallbacks } } } });
+          return json({ ok: true, fallbacks });
+        } catch (patchErr) {
+          console.error("[set-fallbacks] patchConfig failed, trying disk fallback:", patchErr);
+          try {
+            const configPath = join(OPENCLAW_HOME, "openclaw.json");
+            let config: Record<string, unknown> = {};
+            try { config = JSON.parse(await readFile(configPath, "utf-8")); } catch { /* */ }
+            const agents = (config.agents || {}) as Record<string, unknown>;
+            const defaults = (agents.defaults || {}) as Record<string, unknown>;
+            const model = (defaults.model && typeof defaults.model === "object" && !Array.isArray(defaults.model)
+              ? { ...(defaults.model as Record<string, unknown>) }
+              : {}) as Record<string, unknown>;
+            model.fallbacks = fallbacks;
+            defaults.model = model;
+            agents.defaults = defaults;
+            config.agents = agents;
+            await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+            return json({ ok: true, fallbacks });
+          } catch (err) {
+            return json({ error: `Failed to set fallbacks: ${err}` }, 500);
+          }
+        }
+      }
+
       // ── List models from a provider ──
       // Accepts explicit token OR reads stored key from disk
       case "list-models": {

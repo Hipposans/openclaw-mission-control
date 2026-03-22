@@ -52,6 +52,7 @@ type AgentFull = {
 const SUBAGENT_RECENT_WINDOW_MS = 30 * 60 * 1000;
 const SUBAGENT_ACTIVE_WINDOW_MS = 2 * 60 * 1000;
 const AGENTS_CACHE_TTL_MS = 5000;
+const AGENTS_CACHE_MAX_STALE_MS = 60000;
 
 type AgentsGetPayload = {
   agents: AgentFull[];
@@ -64,7 +65,7 @@ type AgentsGetPayload = {
   }>;
 };
 
-let agentsCache: { payload: AgentsGetPayload; expiresAt: number } | null = null;
+let agentsCache: { payload: AgentsGetPayload; expiresAt: number; fetchedAt: number } | null = null;
 
 function asRecord(v: unknown): Record<string, unknown> {
   return v && typeof v === "object" && !Array.isArray(v)
@@ -306,7 +307,7 @@ export async function GET() {
   try {
     const now = Date.now();
     if (agentsCache && now < agentsCache.expiresAt) {
-      return NextResponse.json(agentsCache.payload);
+      return NextResponse.json({ ...agentsCache.payload, stale: false });
     }
 
     // 1. Get config via gateway RPC (replaces both CLI agents list and file read)
@@ -658,15 +659,34 @@ export async function GET() {
       defaultFallbacks,
       configuredChannels,
     };
+    const writtenAt = Date.now();
     agentsCache = {
       payload,
-      expiresAt: Date.now() + AGENTS_CACHE_TTL_MS,
+      expiresAt: writtenAt + AGENTS_CACHE_TTL_MS,
+      fetchedAt: writtenAt,
     };
 
-    return NextResponse.json(payload);
+    return NextResponse.json({ ...payload, stale: false });
   } catch (err) {
     console.error("Agents API error:", err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+
+    // Serve stale cache during gateway outages (up to maxStale window).
+    const now = Date.now();
+    if (agentsCache && now < agentsCache.fetchedAt + AGENTS_CACHE_MAX_STALE_MS) {
+      console.warn("Agents API: serving stale cache due to error:", String(err));
+      return NextResponse.json({ ...agentsCache.payload, stale: true });
+    }
+
+    // No cache at all — return a minimal empty response rather than 503.
+    console.warn("Agents API: no cache available, returning empty response:", String(err));
+    return NextResponse.json({
+      agents: [],
+      owner: null,
+      defaultModel: "unknown",
+      defaultFallbacks: [],
+      configuredChannels: [],
+      stale: true,
+    });
   }
 }
 

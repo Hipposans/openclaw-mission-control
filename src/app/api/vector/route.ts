@@ -3,6 +3,7 @@ import { readdir, readFile, stat, unlink, writeFile } from "fs/promises";
 import { dirname, extname, join, relative, resolve, sep } from "path";
 import { runCliJson, gatewayCall } from "@/lib/openclaw";
 import { getOpenClawHome, getDefaultWorkspace } from "@/lib/paths";
+import { gatewayConfigPatch } from "@/lib/gateway-config";
 import { buildModelsSummary } from "@/lib/models-summary";
 import { gatewayMemoryIndex } from "@/lib/gateway-tools";
 
@@ -163,14 +164,13 @@ async function patchMemorySearchConfig(
       },
     },
   });
-  await gatewayCall(
-    "config.patch",
+  await gatewayConfigPatch(
     {
       raw: patchRaw,
       baseHash,
       ...(typeof restartDelayMs === "number" ? { restartDelayMs } : {}),
     },
-    15000
+    15000,
   );
 }
 
@@ -485,10 +485,9 @@ export async function POST(request: NextRequest) {
           },
         });
 
-        await gatewayCall(
-          "config.patch",
+        await gatewayConfigPatch(
           { raw: setupPatch, baseHash: setupHash },
-          15000
+          15000,
         );
 
         // Trigger initial index (includes extraPaths)
@@ -499,6 +498,17 @@ export async function POST(request: NextRequest) {
         }
 
         return NextResponse.json({ ok: true, action, provider: setupProvider, model: setupModel });
+      }
+
+      case "disable-memory": {
+        // Turn off vector memory without losing config (sets enabled: false)
+        const { hash: disableHash, memorySearch: currentMs } = await getResolvedMemorySearchConfig();
+        if (!currentMs || Object.keys(currentMs).length === 0) {
+          return NextResponse.json({ ok: true, action, message: "Nothing to disable" });
+        }
+        const disabledMs = { ...currentMs, enabled: false };
+        await patchMemorySearchConfig(disableHash, disabledMs);
+        return NextResponse.json({ ok: true, action });
       }
 
       case "update-embedding-model": {

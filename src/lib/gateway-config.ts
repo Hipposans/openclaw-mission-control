@@ -57,6 +57,21 @@ export async function sanitizeConfigFile(): Promise<boolean> {
   return changed;
 }
 
+/**
+ * Central wrapper for `config.patch` that always sanitizes the config file
+ * afterward — even if the gateway call throws (keys can leak before erroring).
+ */
+export async function gatewayConfigPatch<T = void>(
+  params: { raw: string; baseHash?: string; restartDelayMs?: number },
+  timeout = 15000,
+): Promise<T> {
+  try {
+    return await gatewayCall<T>("config.patch", params as Record<string, unknown>, timeout);
+  } finally {
+    await sanitizeConfigFile().catch(() => {});
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -158,6 +173,18 @@ export function isGatewayTransientError(error: unknown): boolean {
     if (typeof error.stderr === "string") parts.push(error.stderr);
   }
   const msg = parts.join(" ").toLowerCase();
+
+  // Scope/auth errors are permanent — never retry.
+  if (
+    msg.includes("missing scope") ||
+    msg.includes("forbidden") ||
+    msg.includes("unauthorized") ||
+    msg.includes("returned 403") ||
+    msg.includes("returned 401")
+  ) {
+    return false;
+  }
+
   return (
     msg.includes("gateway closed") ||
     msg.includes("1006") ||
@@ -260,12 +287,11 @@ export async function patchConfig(
         // Legacy gateway compatibility: some builds omit hash on config.get.
         // First try config.patch without baseHash; if rejected, use CLI config.set fallback.
         try {
-          const patchParams: Record<string, unknown> = { raw };
+          const patchParams: { raw: string; restartDelayMs?: number } = { raw };
           if (opts?.restartDelayMs) {
             patchParams.restartDelayMs = opts.restartDelayMs;
           }
-          await gatewayCall("config.patch", patchParams, 15000);
-          await sanitizeConfigFile().catch(() => {});
+          await gatewayConfigPatch(patchParams, 15000);
           return;
         } catch {
           if (!fallback.entries) {
@@ -283,12 +309,11 @@ export async function patchConfig(
           return;
         }
       }
-      const patchParams: Record<string, unknown> = { raw, baseHash: hash };
+      const patchParams: { raw: string; baseHash: string; restartDelayMs?: number } = { raw, baseHash: hash };
       if (opts?.restartDelayMs) {
         patchParams.restartDelayMs = opts.restartDelayMs;
       }
-      await gatewayCall("config.patch", patchParams, 15000);
-      await sanitizeConfigFile().catch(() => {});
+      await gatewayConfigPatch(patchParams, 15000);
       return;
     } catch (error) {
       lastError = error;

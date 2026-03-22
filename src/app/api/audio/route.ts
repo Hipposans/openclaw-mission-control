@@ -4,7 +4,7 @@ import { runOpenResponsesText } from "@/lib/openresponses";
 import { readFile, stat } from "fs/promises";
 import { extname, join } from "path";
 import { getOpenClawHome } from "@/lib/paths";
-import { fetchConfig, patchConfig } from "@/lib/gateway-config";
+import { fetchConfig, patchConfig, gatewayConfigPatch } from "@/lib/gateway-config";
 
 /* ── Gather personal context for TTS test phrase generation ── */
 
@@ -609,10 +609,9 @@ export async function POST(request: NextRequest) {
             "config.get", undefined, 10000
           );
           const hash = configData.hash as string;
-          await gatewayCall(
-            "config.patch",
+          await gatewayConfigPatch(
             { raw: JSON.stringify({ messages: { tts: { auto: mode } } }), baseHash: hash },
-            15000
+            15000,
           );
           return NextResponse.json({ ok: true, action, mode });
         } catch {
@@ -641,10 +640,9 @@ export async function POST(request: NextRequest) {
             );
             const hash = configData.hash as string;
             const auto = action === "enable" ? "always" : "off";
-            await gatewayCall(
-              "config.patch",
+            await gatewayConfigPatch(
               { raw: JSON.stringify({ messages: { tts: { auto } } }), baseHash: hash },
-              15000
+              15000,
             );
             return NextResponse.json({ ok: true, action, fallback: true });
           } catch {
@@ -678,10 +676,9 @@ export async function POST(request: NextRequest) {
               "config.get", undefined, 10000
             );
             const hash = configData.hash as string;
-            await gatewayCall(
-              "config.patch",
+            await gatewayConfigPatch(
               { raw: JSON.stringify({ messages: { tts: { provider } } }), baseHash: hash },
-              15000
+              15000,
             );
             return NextResponse.json({ ok: true, action, provider, fallback: true });
           } catch {
@@ -845,10 +842,9 @@ export async function POST(request: NextRequest) {
             );
           }
 
-          await gatewayCall(
-            "config.patch",
+          await gatewayConfigPatch(
             { raw: patchRaw, baseHash: hash },
-            15000
+            15000,
           );
           return NextResponse.json({ ok: true, action, section });
         } catch {

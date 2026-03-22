@@ -11,7 +11,6 @@ import { SetupGate } from "@/components/setup-gate";
 import { UsageAlertMonitor } from "@/components/usage-alert-monitor";
 import { OpenClawUpdateBanner } from "@/components/openclaw-update-banner";
 import { MissionControlUpdateBanner } from "@/components/mission-control-update-banner";
-import { CliModeBanner } from "@/components/cli-mode-banner";
 import { ToastRenderer } from "@/components/toast-renderer";
 import { DashboardTourGate } from "@/components/dashboard-tour-gate";
 
@@ -121,7 +120,6 @@ export default function RootLayout({
               <Sidebar />
               <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
                 <Header />
-                <CliModeBanner />
                 <main
                   data-tour="main-content"
                   className="flex flex-1 overflow-hidden bg-stone-50 dark:bg-[#101214]"

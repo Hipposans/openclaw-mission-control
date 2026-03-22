@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { gatewayCall, runCliCaptureBoth } from "@/lib/openclaw";
-import { sanitizeConfigFile } from "@/lib/gateway-config";
+import { gatewayConfigPatch, sanitizeConfigFile } from "@/lib/gateway-config";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { getOpenClawHome } from "@/lib/paths";
@@ -42,6 +42,18 @@ function sleep(ms: number) {
 
 function isTransientGatewayError(err: unknown): boolean {
   const msg = String(err).toLowerCase();
+
+  // Scope/auth errors are permanent — never retry.
+  if (
+    msg.includes("missing scope") ||
+    msg.includes("forbidden") ||
+    msg.includes("unauthorized") ||
+    msg.includes("returned 403") ||
+    msg.includes("returned 401")
+  ) {
+    return false;
+  }
+
   return (
     msg.includes("gateway closed") ||
     msg.includes("1006") ||
@@ -583,16 +595,15 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const params: Record<string, unknown> = {
+    const params: { raw: string; baseHash?: string; restartDelayMs: number } = {
       raw: JSON.stringify(config),
       restartDelayMs: 2000,
     };
     if (baseHash) params.baseHash = baseHash;
 
-    const result = await gatewayCall<Record<string, unknown>>(
-      "config.patch",
+    const result = await gatewayConfigPatch<Record<string, unknown>>(
       params,
-      20000
+      20000,
     );
 
     return NextResponse.json({ ok: true, result });

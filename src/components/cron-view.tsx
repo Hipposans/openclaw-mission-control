@@ -2423,7 +2423,8 @@ export function CronView() {
             };
             runPollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
             // Poll for real session output (agent transcript)
-            const pollDelays = [3000, 6000, 10000];
+            // Jobs can take 15-30s+ to complete, so poll generously
+            const pollDelays = [3000, 6000, 10000, 15000, 20000, 30000, 45000, 60000];
             pollDelays.forEach((delay) => {
               setTimeout(async () => {
                 try {
@@ -2732,9 +2733,7 @@ export function CronView() {
                       ? "bg-zinc-600"
                       : hasError
                         ? "bg-red-500 shadow-md shadow-red-500/40"
-                        : effectiveStatus === "ok"
-                          ? "bg-emerald-500"
-                          : "bg-zinc-500"
+                        : "bg-emerald-500"
                   )}
                 />
                 <div

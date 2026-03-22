@@ -12,6 +12,7 @@ const CLI_ENV = { ...process.env, NO_COLOR: "1", OPENCLAW_ALLOW_INSECURE_PRIVATE
 // exceed the limit are queued and resume in FIFO order as slots free up.
 
 const CLI_MAX_CONCURRENT = 4;
+const CLI_MAX_QUEUED = 12;
 let cliInFlight = 0;
 const cliQueue: Array<() => void> = [];
 
@@ -19,6 +20,13 @@ function acquireCliSlot(): Promise<void> {
   if (cliInFlight < CLI_MAX_CONCURRENT) {
     cliInFlight++;
     return Promise.resolve();
+  }
+  if (cliQueue.length >= CLI_MAX_QUEUED) {
+    return Promise.reject(
+      new Error(
+        `CLI backpressure: ${cliInFlight} running, ${cliQueue.length} queued (limit ${CLI_MAX_QUEUED}). Rejecting to prevent OOM.`,
+      ),
+    );
   }
   return new Promise((resolve) => {
     cliQueue.push(() => {

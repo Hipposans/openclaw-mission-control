@@ -1,16 +1,19 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
   Key,
   Loader2,
+  Pencil,
   Plus,
+  RotateCcw,
   Search,
   Trash2,
   X,
@@ -18,8 +21,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SectionBody, SectionHeader, SectionLayout } from "@/components/section-layout";
-import { useSmartPoll } from "@/hooks/use-smart-poll";
-import { getFriendlyModelName } from "@/lib/model-metadata";
+
+import { getFriendlyModelName, getProviderDisplayName } from "@/lib/model-metadata";
 
 /* ── Provider metadata ──────────────────────────── */
 
@@ -34,11 +37,7 @@ type Provider = {
 const PROVIDERS: Provider[] = [
   { id: "anthropic", name: "Anthropic", hint: "Claude models", keyPrefix: "sk-ant-", url: "https://console.anthropic.com/settings/keys" },
   { id: "openai", name: "OpenAI", hint: "GPT & o-series", keyPrefix: "sk-", url: "https://platform.openai.com/api-keys" },
-  { id: "google", name: "Google", hint: "Gemini models", keyPrefix: "AIza", url: "https://aistudio.google.com/apikey" },
   { id: "openrouter", name: "OpenRouter", hint: "200+ models", keyPrefix: "sk-or-", url: "https://openrouter.ai/keys" },
-  { id: "groq", name: "Groq", hint: "Fast inference", keyPrefix: "gsk_", url: "https://console.groq.com/keys" },
-  { id: "xai", name: "xAI", hint: "Grok models", keyPrefix: "xai-", url: "https://console.x.ai/" },
-  { id: "mistral", name: "Mistral", hint: "Mistral models", keyPrefix: "", url: "https://console.mistral.ai/api-keys/" },
 ];
 
 function findProvider(id: string): Provider | undefined {
@@ -70,6 +69,29 @@ type WizardState = {
   loadingModels: boolean;
 };
 
+type AgentFull = {
+  id: string;
+  name: string;
+  emoji: string;
+  model: string;
+  fallbackModels: string[];
+  isDefault: boolean;
+};
+
+type AgentsResponse = {
+  agents: AgentFull[];
+  defaultModel: string;
+  defaultFallbacks: string[];
+};
+
+/* ── All-provider model list (grouped) ─────────── */
+
+type GroupedModel = {
+  providerId: string;
+  providerLabel: string;
+  models: ModelItem[];
+};
+
 /* ── Shared atoms ────────────────────────────────── */
 
 function StatusDot({ active, className }: { active: boolean; className?: string }) {
@@ -96,7 +118,7 @@ function ProviderAvatar({ name }: { name: string }) {
   );
 }
 
-/* ── Model list (shared between wizard + picker modal) ── */
+/* ── ModelList (for wizard & picker modals) ─────── */
 
 function ModelList({
   models,
@@ -143,7 +165,6 @@ function ModelList({
 
   return (
     <div className="flex flex-col">
-      {/* Search */}
       <div className="sticky top-0 border-b border-[#2c343d] bg-[#171a1d] px-5 py-3">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#3d4752]" />
@@ -159,8 +180,6 @@ function ModelList({
           {filtered.length} model{filtered.length !== 1 ? "s" : ""}
         </p>
       </div>
-
-      {/* List */}
       <div className="max-h-72 overflow-y-auto">
         {filtered.length === 0 ? (
           <p className="py-8 text-center text-xs text-[#7a8591]">No models match your search</p>
@@ -177,9 +196,7 @@ function ModelList({
                   onClick={() => void onSelect(m.id)}
                   className={cn(
                     "group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
-                    isActive
-                      ? "bg-[#34d399]/10"
-                      : "hover:bg-[#20252a]"
+                    isActive ? "bg-[#34d399]/10" : "hover:bg-[#20252a]"
                   )}
                 >
                   <div className="flex h-5 w-5 shrink-0 items-center justify-center">
@@ -210,6 +227,178 @@ function ModelList({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ── ModelSelect — dropdown for choosing a model from all providers ── */
+
+function ModelSelect({
+  value,
+  onChange,
+  groupedModels,
+  loading,
+  placeholder,
+  allowDefault,
+  disabled,
+}: {
+  value: string | null;
+  onChange: (modelId: string | null) => void;
+  groupedModels: GroupedModel[];
+  loading: boolean;
+  placeholder?: string;
+  allowDefault?: boolean;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setTimeout(() => inputRef.current?.focus(), 40);
+  }, [open]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  const allModels = groupedModels.flatMap((g) => g.models.map((m) => ({ ...m, providerId: g.providerId, providerLabel: g.providerLabel })));
+
+  const filtered = query.trim()
+    ? allModels.filter((m) => {
+        const q = query.toLowerCase();
+        return (
+          m.id.toLowerCase().includes(q) ||
+          m.name.toLowerCase().includes(q) ||
+          getFriendlyModelName(m.id).toLowerCase().includes(q) ||
+          m.providerLabel.toLowerCase().includes(q)
+        );
+      })
+    : allModels;
+
+  // Group filtered results by provider
+  const filteredGroups: GroupedModel[] = [];
+  for (const g of groupedModels) {
+    const models = filtered.filter((m) => m.providerId === g.providerId);
+    if (models.length > 0) filteredGroups.push({ ...g, models });
+  }
+
+  const displayValue = value
+    ? getFriendlyModelName(value)
+    : allowDefault
+    ? "Use default"
+    : (placeholder ?? "Select a model");
+
+  function handleSelect(modelId: string | null) {
+    onChange(modelId);
+    setOpen(false);
+    setQuery("");
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        disabled={disabled || loading}
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          "flex w-full items-center gap-2 rounded-lg border border-[#2c343d] bg-[#15191d] px-3 py-2 text-sm transition-colors",
+          "hover:border-[#3d4752] focus:border-[#34d399]/40 focus:outline-none focus:ring-2 focus:ring-[#34d399]/20",
+          "disabled:cursor-not-allowed disabled:opacity-50",
+          open && "border-[#34d399]/40 ring-2 ring-[#34d399]/20"
+        )}
+      >
+        {loading ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-[#34d399]" />
+        ) : value ? (
+          <span className="h-2 w-2 shrink-0 rounded-full bg-[#34d399]" />
+        ) : null}
+        <span className={cn("flex-1 truncate text-left", value ? "text-[#f5f7fa]" : "text-[#7a8591]")}>
+          {loading ? "Loading models..." : displayValue}
+        </span>
+        <ChevronDown className={cn("h-4 w-4 shrink-0 text-[#7a8591] transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-80 overflow-hidden rounded-xl border border-[#2c343d] bg-[#171a1d] shadow-2xl">
+          <div className="border-b border-[#2c343d] px-3 py-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-[#3d4752]" />
+              <input
+                ref={inputRef}
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search models..."
+                className="w-full rounded-md border border-[#2c343d] bg-[#15191d] py-1.5 pl-8 pr-2 text-xs text-[#f5f7fa] placeholder-[#3d4752] focus:outline-none"
+              />
+            </div>
+          </div>
+          <div className="overflow-y-auto" style={{ maxHeight: "16rem" }}>
+            {allowDefault && (
+              <button
+                type="button"
+                onClick={() => handleSelect(null)}
+                className={cn(
+                  "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-[#20252a]",
+                  value === null ? "bg-[#34d399]/5 text-[#34d399]" : "text-[#a8b0ba]"
+                )}
+              >
+                <div className="flex h-4 w-4 shrink-0 items-center justify-center">
+                  {value === null && <Check className="h-3 w-3 text-[#34d399]" />}
+                </div>
+                Use default
+              </button>
+            )}
+            {filteredGroups.length === 0 && (
+              <p className="py-6 text-center text-xs text-[#7a8591]">
+                {query ? "No models match your search" : "No models available"}
+              </p>
+            )}
+            {filteredGroups.map((group) => (
+              <div key={group.providerId}>
+                <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[#3d4752]">
+                  {group.providerLabel}
+                </p>
+                {group.models.map((m) => {
+                  const friendlyName = getFriendlyModelName(m.id);
+                  const displayName = friendlyName !== m.id ? friendlyName : (m.name || m.id);
+                  const isSelected = m.id === value;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => handleSelect(m.id)}
+                      className={cn(
+                        "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors",
+                        isSelected ? "bg-[#34d399]/10 text-[#34d399]" : "text-[#f5f7fa] hover:bg-[#20252a]"
+                      )}
+                    >
+                      <div className="flex h-4 w-4 shrink-0 items-center justify-center">
+                        {isSelected && <Check className="h-3 w-3 text-[#34d399]" />}
+                      </div>
+                      <span className="truncate">{displayName}</span>
+                      {displayName !== m.id && (
+                        <span className="ml-auto shrink-0 font-mono text-[10px] text-[#7a8591]">
+                          {m.id.split("/").pop()}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -295,23 +484,9 @@ function AddProviderWizard({
         return;
       }
 
-      // Fetch available models
-      setWizard((s) => ({ ...s, step: "pick-model", loadingModels: true, models: [] }));
-
-      const modelsRes = await fetch("/api/models", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list-models", provider: wizard.providerId }),
-        signal: AbortSignal.timeout(10000),
-      });
-      const modelsData = await modelsRes.json();
-
-      setWizard((s) => ({
-        ...s,
-        models: modelsData.ok ? (modelsData.models ?? []) : [],
-        loadingModels: false,
-        error: null,
-      }));
+      // Provider is connected — skip model step, go straight to done
+      setWizard((s) => ({ ...s, step: "done" }));
+      onDone();
     } catch {
       setWizard((s) => ({
         ...s,
@@ -320,21 +495,6 @@ function AddProviderWizard({
         loadingModels: false,
       }));
     }
-  }
-
-  async function handleSetModel(modelId: string) {
-    try {
-      await fetch("/api/models", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "set-primary", model: modelId }),
-        signal: AbortSignal.timeout(10000),
-      });
-    } catch {
-      // Provider is already saved — model can be changed later
-    }
-    setWizard((s) => ({ ...s, step: "done" }));
-    onDone();
   }
 
   const canGoBack =
@@ -366,11 +526,6 @@ function AddProviderWizard({
             {wizard.step === "key" && provider && (
               <p className="mt-0.5 text-xs text-[#7a8591]">
                 Paste your {provider.name} API key below
-              </p>
-            )}
-            {wizard.step === "pick-model" && (
-              <p className="mt-0.5 text-xs text-[#7a8591]">
-                Select which model your assistant will use
               </p>
             )}
           </div>
@@ -410,7 +565,6 @@ function AddProviderWizard({
           {/* Step: enter API key */}
           {wizard.step === "key" && provider && (
             <div className="space-y-4 p-5">
-              {/* Instructions card */}
               <div className="rounded-xl border border-[#2c343d] bg-[#15191d] p-4">
                 <div className="mb-3 flex items-center gap-2">
                   <Key className="h-3.5 w-3.5 shrink-0 text-[#34d399]" />
@@ -455,7 +609,6 @@ function AddProviderWizard({
                 </ol>
               </div>
 
-              {/* Key input */}
               <div className="space-y-2">
                 <label
                   htmlFor="models-api-key-input"
@@ -521,16 +674,6 @@ function AddProviderWizard({
             </div>
           )}
 
-          {/* Step: pick-model */}
-          {wizard.step === "pick-model" && (
-            <ModelList
-              models={wizard.models}
-              loading={wizard.loadingModels}
-              currentModel={null}
-              onSelect={handleSetModel}
-            />
-          )}
-
           {/* Step: done */}
           {wizard.step === "done" && (
             <div className="flex flex-col items-center gap-5 px-5 py-10">
@@ -541,7 +684,7 @@ function AddProviderWizard({
               <div className="text-center">
                 <p className="text-sm font-semibold text-[#f5f7fa]">Provider connected!</p>
                 <p className="mt-1 text-xs leading-relaxed text-[#7a8591]">
-                  Your AI model is active and ready to use.
+                  You can now pick a model in the Default Model section.
                 </p>
               </div>
             </div>
@@ -567,17 +710,7 @@ function AddProviderWizard({
               disabled={!wizard.apiKey.trim()}
               className="w-full rounded-lg bg-[#34d399] px-4 py-2.5 text-sm font-semibold text-[#0d1117] transition-all hover:bg-[#2dbe8c] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Validate &amp; Continue
-            </button>
-          )}
-
-          {wizard.step === "pick-model" && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="w-full rounded-lg border border-[#2c343d] bg-[#20252a] px-4 py-2.5 text-sm font-medium text-[#a8b0ba] transition-colors hover:border-[#3d4752] hover:text-[#f5f7fa]"
-            >
-              Skip for now
+              Validate &amp; Connect
             </button>
           )}
 
@@ -596,78 +729,52 @@ function AddProviderWizard({
   );
 }
 
-/* ── Model Picker Modal (from "Pick model" on provider cards) ── */
+/* ── Model Picker Modal ──────────────────────────── */
 
 function ModelPickerModal({
-  provider,
+  title,
+  subtitle,
   currentModel,
+  groupedModels,
+  loadingModels,
   onClose,
   onSelect,
+  allowDefault,
 }: {
-  provider: Provider;
+  title: string;
+  subtitle?: string;
   currentModel: string | null;
+  groupedModels: GroupedModel[];
+  loadingModels: boolean;
   onClose: () => void;
-  onSelect: () => void;
+  onSelect: (modelId: string | null) => Promise<void>;
+  allowDefault?: boolean;
 }) {
-  const [models, setModels] = useState<ModelItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const fetchModels = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
+  const allModels = groupedModels.flatMap((g) => g.models);
+
+  async function handleSelect(modelId: string | null) {
+    setSaving(true);
+    setError(null);
     try {
-      const res = await fetch("/api/models", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list-models", provider: provider.id }),
-        signal: AbortSignal.timeout(10000),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        setModels(data.models ?? []);
-      } else {
-        setFetchError(data.error ?? "Could not load models.");
-      }
+      await onSelect(modelId);
+      onClose();
     } catch {
-      setFetchError("Network error or request timed out.");
+      setError("Could not save model selection. Try again.");
     } finally {
-      setLoading(false);
-    }
-  }, [provider.id]);
-
-  // Fetch once on mount
-  const didFetch = useRef(false);
-  if (!didFetch.current) {
-    didFetch.current = true;
-    void fetchModels();
-  }
-
-  async function handleSelect(modelId: string) {
-    try {
-      await fetch("/api/models", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "set-primary", model: modelId }),
-        signal: AbortSignal.timeout(10000),
-      });
-      onSelect();
-    } catch {
-      setFetchError("Could not save model selection. Try again.");
+      setSaving(false);
     }
   }
 
   return (
     <div className="animate-backdrop-in fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center">
       <div className="animate-modal-in mx-0 flex w-full max-w-lg flex-col rounded-t-2xl border border-[#2c343d] bg-[#171a1d] shadow-2xl sm:mx-4 sm:rounded-2xl">
-        {/* Header */}
         <div className="flex shrink-0 items-center gap-3 border-b border-[#2c343d] px-5 py-4">
-          <ProviderAvatar name={provider.name} />
           <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold text-[#f5f7fa]">{provider.name} models</h2>
-            <p className="mt-0.5 text-xs text-[#7a8591]">
-              Click any model to make it active
-            </p>
+            <h2 className="text-sm font-semibold text-[#f5f7fa]">{title}</h2>
+            {subtitle && <p className="mt-0.5 text-xs text-[#7a8591]">{subtitle}</p>}
           </div>
           <button
             type="button"
@@ -679,31 +786,58 @@ function ModelPickerModal({
           </button>
         </div>
 
-        {/* Body */}
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {fetchError ? (
-            <div className="flex flex-col items-center gap-3 py-12 text-center">
-              <AlertCircle className="h-8 w-8 text-[#3d4752]" />
-              <p className="text-sm text-[#a8b0ba]">{fetchError}</p>
-              <button
-                type="button"
-                onClick={() => void fetchModels()}
-                className="mt-1 rounded-lg border border-[#2c343d] px-3 py-1.5 text-xs text-[#a8b0ba] hover:border-[#3d4752] hover:text-[#f5f7fa]"
-              >
-                Retry
-              </button>
+          {error && (
+            <div className="mx-5 mt-4 flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2.5">
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
+              <p className="text-xs text-red-400">{error}</p>
+            </div>
+          )}
+          {saving ? (
+            <div className="flex flex-col items-center gap-3 py-14">
+              <Loader2 className="h-6 w-6 animate-spin text-[#34d399]" />
+              <p className="text-xs text-[#7a8591]">Saving...</p>
             </div>
           ) : (
-            <ModelList
-              models={models}
-              loading={loading}
-              currentModel={currentModel}
-              onSelect={handleSelect}
-            />
+            <div className="flex flex-col">
+              {allowDefault && (
+                <div className="border-b border-[#2c343d] p-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleSelect(null)}
+                    className={cn(
+                      "group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
+                      currentModel === null ? "bg-[#34d399]/10" : "hover:bg-[#20252a]"
+                    )}
+                  >
+                    <div className="flex h-5 w-5 shrink-0 items-center justify-center">
+                      {currentModel === null ? (
+                        <Check className="h-4 w-4 text-[#34d399]" strokeWidth={2.5} />
+                      ) : (
+                        <div className="h-1.5 w-1.5 rounded-full bg-[#3d4752]" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <span className={cn("block text-sm font-medium", currentModel === null ? "text-[#34d399]" : "text-[#f5f7fa]")}>
+                        Use default
+                      </span>
+                      <span className="block text-[11px] text-[#7a8591]">
+                        Inherits the primary model
+                      </span>
+                    </div>
+                  </button>
+                </div>
+              )}
+              <ModelList
+                models={allModels}
+                loading={loadingModels}
+                currentModel={currentModel}
+                onSelect={(id) => void handleSelect(id)}
+              />
+            </div>
           )}
         </div>
 
-        {/* Footer */}
         <div className="shrink-0 border-t border-[#2c343d] px-5 py-4">
           <button
             type="button"
@@ -720,7 +854,7 @@ function ModelPickerModal({
 
 /* ── Remove button (double-click confirm) ───────── */
 
-function RemoveButton({ onRemove }: { onRemove: () => void }) {
+function RemoveButton({ onRemove, label = "Remove" }: { onRemove: () => void; label?: string }) {
   const [confirming, setConfirming] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -747,115 +881,25 @@ function RemoveButton({ onRemove }: { onRemove: () => void }) {
       )}
     >
       <Trash2 className="h-3 w-3 shrink-0" />
-      {confirming ? "Click again to confirm" : "Remove"}
+      {confirming ? "Click again to confirm" : label}
     </button>
-  );
-}
-
-/* ── Provider card ──────────────────────────────── */
-
-function ProviderCard({
-  providerId,
-  currentModel,
-  onPickModel,
-  onRemove,
-}: {
-  providerId: string;
-  currentModel: string | null;
-  onPickModel: () => void;
-  onRemove: () => void;
-}) {
-  const provider = findProvider(providerId);
-  const name = provider?.name ?? providerId;
-  const isActiveProvider = currentModel?.startsWith(providerId + "/") ?? false;
-  const activeModelName =
-    isActiveProvider && currentModel ? getFriendlyModelName(currentModel) : null;
-
-  return (
-    <div className="flex items-center gap-4 rounded-xl border border-[#2c343d] bg-[#15191d] p-4">
-      <ProviderAvatar name={name} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <StatusDot active />
-          <span className="text-sm font-semibold text-[#f5f7fa]">{name}</span>
-        </div>
-        {activeModelName ? (
-          <p className="mt-0.5 truncate text-xs text-[#34d399]">Active: {activeModelName}</p>
-        ) : (
-          <p className="mt-0.5 text-xs text-[#7a8591]">No model selected from this provider</p>
-        )}
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <button
-          type="button"
-          onClick={onPickModel}
-          className="flex items-center gap-1.5 rounded-lg border border-[#2c343d] bg-[#20252a] px-2.5 py-1.5 text-xs font-medium text-[#a8b0ba] transition-all hover:border-[#34d399]/30 hover:text-[#34d399]"
-        >
-          <Zap className="h-3 w-3 shrink-0" />
-          Pick model
-        </button>
-        <RemoveButton onRemove={onRemove} />
-      </div>
-    </div>
-  );
-}
-
-/* ── Active model banner ─────────────────────────── */
-
-function ActiveModelBanner({
-  model,
-  onAddProvider,
-}: {
-  model: string | null;
-  onAddProvider: () => void;
-}) {
-  if (model) {
-    const friendlyName = getFriendlyModelName(model);
-    return (
-      <div className="flex items-center gap-4 rounded-xl border border-[#34d399]/20 bg-[#34d399]/5 p-4">
-        <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#34d399]/10">
-          <StatusDot active />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-medium uppercase tracking-wider text-[#34d399]">
-            Active model
-          </p>
-          <p className="mt-0.5 truncate text-sm font-semibold text-[#f5f7fa]">{friendlyName}</p>
-          <p className="mt-0.5 truncate font-mono text-[11px] text-[#7a8591]">{model}</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/10">
-        <AlertTriangle className="h-5 w-5 text-amber-400" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-[#f5f7fa]">No model configured</p>
-        <p className="mt-0.5 text-xs text-[#7a8591]">
-          Connect an AI provider and pick a model to get started.
-        </p>
-      </div>
-      <button
-        type="button"
-        onClick={onAddProvider}
-        className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[#34d399] px-3 py-1.5 text-xs font-semibold text-[#0d1117] transition-all hover:bg-[#2dbe8c]"
-      >
-        <Plus className="h-3 w-3 shrink-0" />
-        Add provider
-      </button>
-    </div>
   );
 }
 
 /* ── Toast ──────────────────────────────────────── */
 
-function Toast({ message, onClose }: { message: string; onClose: () => void }) {
+function Toast({ message, type = "error", onClose }: { message: string; type?: "error" | "success"; onClose: () => void }) {
   return (
-    <div className="animate-modal-in fixed bottom-6 left-1/2 z-60 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-red-500/20 bg-[#1d2227] px-4 py-3 shadow-2xl">
-      <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
+    <div className="animate-modal-in fixed bottom-6 left-1/2 z-60 flex -translate-x-1/2 items-center gap-3 rounded-xl border bg-[#1d2227] px-4 py-3 shadow-2xl"
+      style={{
+        borderColor: type === "success" ? "rgba(52,211,153,0.2)" : "rgba(239,68,68,0.2)",
+      }}
+    >
+      {type === "success" ? (
+        <Check className="h-4 w-4 shrink-0 text-[#34d399]" />
+      ) : (
+        <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
+      )}
       <span className="whitespace-nowrap text-sm text-[#f5f7fa]">{message}</span>
       <button
         type="button"
@@ -868,14 +912,694 @@ function Toast({ message, onClose }: { message: string; onClose: () => void }) {
   );
 }
 
+/* ── Section card wrapper ─────────────────────────── */
+
+function Card({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={cn("rounded-xl border border-[#2c343d] bg-[#15191d]", className)}>
+      {children}
+    </div>
+  );
+}
+
+function CardHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-[#2c343d] px-5 py-4">
+      {children}
+    </div>
+  );
+}
+
+/* ── Section 1: Default Model card ─────────────── */
+
+function DefaultModelCard({
+  primaryModel,
+  fallbacks,
+  groupedModels,
+  loadingModels,
+  onRefresh,
+  onAddProvider,
+  hasProviders,
+}: {
+  primaryModel: string | null;
+  fallbacks: string[];
+  groupedModels: GroupedModel[];
+  loadingModels: boolean;
+  onRefresh: () => void;
+  onAddProvider: () => void;
+  hasProviders: boolean;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [showFallbackPicker, setShowFallbackPicker] = useState(false);
+
+  async function handleSetPrimary(modelId: string) {
+    setSaving(true);
+    try {
+      await fetch("/api/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set-primary", model: modelId }),
+        signal: AbortSignal.timeout(10000),
+      });
+      onRefresh();
+    } catch {
+      // Silently fail — user can retry
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRemoveFallback(index: number) {
+    const next = fallbacks.filter((_, i) => i !== index);
+    try {
+      await fetch("/api/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set-fallbacks", fallbacks: next }),
+        signal: AbortSignal.timeout(10000),
+      });
+      onRefresh();
+    } catch {
+      // Silently fail
+    }
+  }
+
+  async function handleAddFallback(modelId: string | null) {
+    if (!modelId) return;
+    if (fallbacks.includes(modelId)) return;
+    const next = [...fallbacks, modelId];
+    await fetch("/api/models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "set-fallbacks", fallbacks: next }),
+      signal: AbortSignal.timeout(10000),
+    });
+    onRefresh();
+  }
+
+  const friendlyPrimary = primaryModel ? getFriendlyModelName(primaryModel) : null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <div>
+          <h2 className="text-sm font-semibold text-[#f5f7fa]">Default Model</h2>
+          <p className="mt-0.5 text-xs text-[#7a8591]">
+            Used by all agents unless overridden
+          </p>
+        </div>
+      </CardHeader>
+
+      <div className="p-5 space-y-5">
+        {/* Primary model row */}
+        <div className="space-y-2">
+          <label className="block text-xs font-medium text-[#d6dce3]">Primary model</label>
+          {!hasProviders ? (
+            <button
+              type="button"
+              onClick={onAddProvider}
+              className="flex items-center gap-2 rounded-lg border border-dashed border-[#2c343d] bg-[#15191d] px-3 py-2.5 text-xs text-[#7a8591] transition-colors hover:border-[#3d4752] hover:text-[#a8b0ba]"
+            >
+              <Plus className="h-3.5 w-3.5 shrink-0" />
+              Connect a provider to pick a model
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <div className="flex-1">
+                <ModelSelect
+                  value={primaryModel}
+                  onChange={(id) => { if (id) void handleSetPrimary(id); }}
+                  groupedModels={groupedModels}
+                  loading={loadingModels || saving}
+                  placeholder="Select a model"
+                />
+              </div>
+            </div>
+          )}
+
+          {primaryModel && (
+            <div className="flex items-center gap-2 rounded-lg border border-[#34d399]/20 bg-[#34d399]/5 px-3 py-2">
+              <StatusDot active />
+              <span className="text-xs font-medium text-[#34d399]">{friendlyPrimary}</span>
+              <span className="ml-1 font-mono text-[10px] text-[#7a8591]">{primaryModel}</span>
+            </div>
+          )}
+
+          {!primaryModel && hasProviders && (
+            <div className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+              <span className="text-xs text-amber-300">No primary model selected</span>
+            </div>
+          )}
+        </div>
+
+        {/* Fallback chain */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-medium text-[#d6dce3]">Fallback chain</label>
+            {hasProviders && (
+              <button
+                type="button"
+                onClick={() => setShowFallbackPicker(true)}
+                className="flex items-center gap-1 text-[11px] text-[#34d399] hover:text-[#2dbe8c] transition-colors"
+              >
+                <Plus className="h-3 w-3" />
+                Add fallback
+              </button>
+            )}
+          </div>
+          <p className="text-[11px] text-[#7a8591]">
+            Fallback models are tried in order if the primary is unavailable
+          </p>
+
+          {fallbacks.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-[#2c343d] px-3 py-3 text-center">
+              <p className="text-xs text-[#3d4752]">No fallbacks configured</p>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {fallbacks.map((fb, i) => (
+                <div
+                  key={fb}
+                  className="flex items-center gap-2.5 rounded-lg border border-[#2c343d] bg-[#15191d] px-3 py-2"
+                >
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#20252a] text-[10px] font-semibold text-[#7a8591]">
+                    {i + 1}
+                  </span>
+                  <span className="flex-1 truncate text-xs text-[#f5f7fa]">
+                    {getFriendlyModelName(fb)}
+                  </span>
+                  <span className="hidden truncate font-mono text-[10px] text-[#7a8591] sm:block">
+                    {fb}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void handleRemoveFallback(i)}
+                    aria-label="Remove fallback"
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[#3d4752] transition-colors hover:text-red-400"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {showFallbackPicker && (
+        <ModelPickerModal
+          title="Add fallback model"
+          subtitle="Added to the end of the fallback chain"
+          currentModel={null}
+          groupedModels={groupedModels}
+          loadingModels={loadingModels}
+          onClose={() => setShowFallbackPicker(false)}
+          onSelect={handleAddFallback}
+        />
+      )}
+    </Card>
+  );
+}
+
+/* ── Agent model row ─────────────────────────────── */
+
+type AgentRowState = "idle" | "editing";
+
+function AgentModelRow({
+  agent,
+  defaultModel,
+  defaultFallbacks,
+  groupedModels,
+  loadingModels,
+  onSave,
+}: {
+  agent: AgentFull;
+  defaultModel: string;
+  defaultFallbacks: string[];
+  groupedModels: GroupedModel[];
+  loadingModels: boolean;
+  onSave: () => void;
+}) {
+  const [rowState, setRowState] = useState<AgentRowState>("idle");
+  const [editModel, setEditModel] = useState<string | null>(null);
+  const [editFallbacks, setEditFallbacks] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [showFallbackPicker, setShowFallbackPicker] = useState(false);
+
+  // Determine if this agent has a custom model (not just inheriting default)
+  const hasCustomModel = agent.model !== defaultModel;
+  // Effective model for display — agent's model (may equal default)
+  const effectiveModel = agent.model;
+  const effectiveFriendly = getFriendlyModelName(effectiveModel);
+
+  function startEdit() {
+    // If agent has a custom model, pre-fill; else null means "use default"
+    setEditModel(hasCustomModel ? agent.model : null);
+    setEditFallbacks(hasCustomModel ? agent.fallbackModels : []);
+    setRowState("editing");
+  }
+
+  function cancelEdit() {
+    setRowState("idle");
+    setEditModel(null);
+    setEditFallbacks([]);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await fetch("/api/agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update",
+          id: agent.id,
+          model: editModel ?? null,
+          fallbacks: editModel ? editFallbacks : [],
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      setRowState("idle");
+      onSave();
+    } catch {
+      // Leave editing state so user can retry
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleReset() {
+    setSaving(true);
+    try {
+      await fetch("/api/agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update",
+          id: agent.id,
+          model: null,
+          fallbacks: [],
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      onSave();
+    } catch {
+      // Silently fail
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleAddFallback(modelId: string | null) {
+    if (!modelId || editFallbacks.includes(modelId)) return;
+    setEditFallbacks((prev) => [...prev, modelId]);
+  }
+
+  if (rowState === "editing") {
+    return (
+      <div className="border-b border-[#2c343d] last:border-b-0">
+        <div className="flex items-center gap-3 px-4 py-3">
+          <span className="shrink-0 text-base">{agent.emoji}</span>
+          <div className="min-w-0 flex-1">
+            <span className="text-sm font-medium text-[#f5f7fa]">{agent.name}</span>
+          </div>
+          <button
+            type="button"
+            onClick={cancelEdit}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[#7a8591] hover:text-[#f5f7fa]"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        <div className="space-y-3 border-t border-[#1d2227] bg-[#13171b] px-4 pb-4 pt-3">
+          <div className="space-y-1.5">
+            <label className="block text-[11px] font-medium text-[#7a8591] uppercase tracking-wide">Model</label>
+            <ModelSelect
+              value={editModel}
+              onChange={setEditModel}
+              groupedModels={groupedModels}
+              loading={loadingModels}
+              allowDefault
+            />
+          </div>
+
+          {editModel && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="block text-[11px] font-medium text-[#7a8591] uppercase tracking-wide">
+                  Fallbacks
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowFallbackPicker(true)}
+                  className="flex items-center gap-1 text-[10px] text-[#34d399] hover:text-[#2dbe8c]"
+                >
+                  <Plus className="h-2.5 w-2.5" />
+                  Add
+                </button>
+              </div>
+              {editFallbacks.length === 0 ? (
+                <p className="text-[11px] text-[#3d4752]">No fallbacks — add one above</p>
+              ) : (
+                <div className="space-y-1">
+                  {editFallbacks.map((fb, i) => (
+                    <div key={fb} className="flex items-center gap-2 rounded-md border border-[#2c343d] bg-[#15191d] px-2 py-1.5">
+                      <span className="text-[10px] text-[#7a8591]">{i + 1}</span>
+                      <span className="flex-1 truncate text-[11px] text-[#f5f7fa]">
+                        {getFriendlyModelName(fb)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setEditFallbacks((prev) => prev.filter((_, j) => j !== i))}
+                        className="flex h-4 w-4 items-center justify-center rounded text-[#3d4752] hover:text-red-400"
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={saving}
+              className="flex items-center gap-1.5 rounded-lg bg-[#34d399] px-3 py-1.5 text-xs font-semibold text-[#0d1117] transition-all hover:bg-[#2dbe8c] disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={cancelEdit}
+              className="rounded-lg border border-[#2c343d] px-3 py-1.5 text-xs text-[#a8b0ba] hover:border-[#3d4752] hover:text-[#f5f7fa]"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+
+        {showFallbackPicker && (
+          <ModelPickerModal
+            title="Add fallback model"
+            subtitle="Tried if the agent's primary model fails"
+            currentModel={null}
+            groupedModels={groupedModels}
+            loadingModels={loadingModels}
+            onClose={() => setShowFallbackPicker(false)}
+            onSelect={handleAddFallback}
+          />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-3 border-b border-[#2c343d] px-4 py-3 last:border-b-0">
+      <span className="shrink-0 text-base">{agent.emoji}</span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className="text-sm font-medium text-[#f5f7fa]">{agent.name}</span>
+          {agent.isDefault && (
+            <span className="rounded-full bg-[#20252a] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#7a8591]">
+              default
+            </span>
+          )}
+        </div>
+        <div className="mt-0.5 flex items-center gap-2">
+          <span className={cn("truncate text-xs", hasCustomModel ? "text-[#f5f7fa]" : "text-[#7a8591]")}>
+            {effectiveFriendly}
+          </span>
+          {!hasCustomModel && (
+            <span className="shrink-0 text-[10px] text-[#3d4752]">(default)</span>
+          )}
+          {hasCustomModel && agent.fallbackModels.length > 0 && (
+            <span className="shrink-0 rounded border border-[#2c343d] bg-[#20252a] px-1 py-0.5 text-[9px] text-[#7a8591]">
+              {agent.fallbackModels.length} fallback{agent.fallbackModels.length !== 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {hasCustomModel ? (
+          <>
+            <button
+              type="button"
+              onClick={startEdit}
+              className="flex items-center gap-1.5 rounded-lg border border-[#2c343d] bg-[#20252a] px-2.5 py-1.5 text-xs font-medium text-[#a8b0ba] transition-all hover:border-[#34d399]/30 hover:text-[#34d399]"
+            >
+              <Pencil className="h-3 w-3 shrink-0" />
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleReset()}
+              disabled={saving}
+              title="Reset to default"
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#2c343d] bg-[#20252a] text-[#7a8591] transition-all hover:border-red-500/30 hover:text-red-400 disabled:opacity-50"
+            >
+              <RotateCcw className="h-3 w-3 shrink-0" />
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={startEdit}
+            className="flex items-center gap-1.5 rounded-lg border border-[#2c343d] bg-[#20252a] px-2.5 py-1.5 text-xs font-medium text-[#7a8591] transition-all hover:border-[#3d4752] hover:text-[#a8b0ba]"
+          >
+            <Pencil className="h-3 w-3 shrink-0" />
+            Override
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Section 2: Agent Models card ───────────────── */
+
+function AgentModelsCard({
+  agents,
+  defaultModel,
+  defaultFallbacks,
+  groupedModels,
+  loadingModels,
+  loadingAgents,
+  onRefresh,
+}: {
+  agents: AgentFull[];
+  defaultModel: string;
+  defaultFallbacks: string[];
+  groupedModels: GroupedModel[];
+  loadingModels: boolean;
+  loadingAgents: boolean;
+  onRefresh: () => void;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <div>
+          <h2 className="text-sm font-semibold text-[#f5f7fa]">Agent Models</h2>
+          <p className="mt-0.5 text-xs text-[#7a8591]">
+            Override the model for individual agents
+          </p>
+        </div>
+        {agents.length > 0 && (
+          <span className="rounded-full border border-[#2c343d] bg-[#20252a] px-2 py-0.5 text-[11px] font-medium text-[#7a8591]">
+            {agents.length}
+          </span>
+        )}
+      </CardHeader>
+
+      {loadingAgents && agents.length === 0 ? (
+        <div className="flex flex-col items-center gap-3 py-10">
+          <Loader2 className="h-5 w-5 animate-spin text-[#34d399]" />
+          <p className="text-xs text-[#7a8591]">Loading agents...</p>
+        </div>
+      ) : agents.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-10 text-center">
+          <p className="text-sm text-[#7a8591]">No agents configured</p>
+          <p className="text-xs text-[#3d4752]">Create an agent to assign a specific model</p>
+        </div>
+      ) : (
+        <div>
+          {agents.map((agent) => (
+            <AgentModelRow
+              key={agent.id}
+              agent={agent}
+              defaultModel={defaultModel}
+              defaultFallbacks={defaultFallbacks}
+              groupedModels={groupedModels}
+              loadingModels={loadingModels}
+              onSave={onRefresh}
+            />
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/* ── Section 3: Providers card ──────────────────── */
+
+function ProvidersCard({
+  configuredProviders,
+  agents,
+  onAddProvider,
+  onManageProvider,
+  onRemoveProvider,
+}: {
+  configuredProviders: string[];
+  agents: AgentFull[];
+  onAddProvider: (providerId?: string) => void;
+  onManageProvider: (providerId: string) => void;
+  onRemoveProvider: (providerId: string) => void;
+}) {
+  const unconnectedProviders = PROVIDERS.filter((p) => !configuredProviders.includes(p.id));
+
+  // Count how many agent models reference each provider
+  function modelsInUseCount(providerId: string): number {
+    return agents.filter((a) => {
+      const parts = a.model.split("/");
+      const providerPart = parts[0] ?? "";
+      return providerPart === providerId;
+    }).length;
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div>
+          <h2 className="text-sm font-semibold text-[#f5f7fa]">Providers</h2>
+          <p className="mt-0.5 text-xs text-[#7a8591]">
+            Manage your AI provider connections
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => onAddProvider()}
+          className="flex items-center gap-1.5 rounded-lg bg-[#34d399] px-3 py-1.5 text-xs font-semibold text-[#0d1117] transition-all hover:bg-[#2dbe8c]"
+        >
+          <Plus className="h-3.5 w-3.5 shrink-0" />
+          Add provider
+        </button>
+      </CardHeader>
+
+      {configuredProviders.length === 0 && unconnectedProviders.length === 0 ? (
+        <div className="flex flex-col items-center gap-3 py-12 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-[#2c343d] bg-[#20252a]">
+            <Key className="h-6 w-6 text-[#3d4752]" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-[#f5f7fa]">No providers available</p>
+            <p className="mt-1 text-xs text-[#7a8591]">Check back later for new integrations</p>
+          </div>
+        </div>
+      ) : (
+        <div className="divide-y divide-[#2c343d]">
+          {/* Connected providers */}
+          {configuredProviders.map((pid) => {
+            const providerMeta = findProvider(pid);
+            const displayName = providerMeta?.name ?? getProviderDisplayName(pid);
+            const inUse = modelsInUseCount(pid);
+
+            return (
+              <div key={pid} className="flex items-center gap-4 px-5 py-4">
+                <ProviderAvatar name={displayName} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <StatusDot active />
+                    <span className="text-sm font-semibold text-[#f5f7fa]">{displayName}</span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-[#7a8591]">
+                    Connected
+                    {inUse > 0 && (
+                      <span className="ml-1 text-[#34d399]">
+                        · {inUse} model{inUse !== 1 ? "s" : ""} in use
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onManageProvider(pid)}
+                    className="flex items-center gap-1.5 rounded-lg border border-[#2c343d] bg-[#20252a] px-2.5 py-1.5 text-xs font-medium text-[#a8b0ba] transition-all hover:border-[#3d4752] hover:text-[#f5f7fa]"
+                  >
+                    <Zap className="h-3 w-3 shrink-0" />
+                    Manage
+                  </button>
+                  <RemoveButton onRemove={() => onRemoveProvider(pid)} />
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Empty state for connected section */}
+          {configuredProviders.length === 0 && (
+            <div className="flex flex-col items-center gap-3 px-5 py-8 text-center">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-dashed border-[#2c343d]">
+                <Key className="h-4 w-4 text-[#3d4752]" />
+              </div>
+              <div>
+                <p className="text-sm text-[#a8b0ba]">No providers connected yet</p>
+                <p className="mt-0.5 text-xs text-[#7a8591]">
+                  Add a provider below to get started
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Available providers */}
+          {unconnectedProviders.length > 0 && (
+            <div className="px-5 py-4">
+              <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[#3d4752]">
+                Available
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {unconnectedProviders.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => onAddProvider(p.id)}
+                    className="group flex flex-col items-start gap-2 rounded-xl border border-[#2c343d] bg-[#1d2227] p-3 text-left transition-all hover:border-[#3d4752] hover:bg-[#20252a]"
+                  >
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#2c343d] bg-[#20252a] text-xs font-bold text-[#a8b0ba]">
+                      {p.name.charAt(0)}
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-[#d6dce3]">{p.name}</p>
+                      <p className="text-[10px] text-[#7a8591]">{p.hint}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 /* ── Main view ──────────────────────────────────── */
 
 export function ModelsView() {
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
+  const [agentsData, setAgentsData] = useState<AgentsResponse | null>(null);
+  const [groupedModels, setGroupedModels] = useState<GroupedModel[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [loadingAgents, setLoadingAgents] = useState(false);
+
   const [showWizard, setShowWizard] = useState(false);
   const [wizardProviderId, setWizardProviderId] = useState<string | null>(null);
-  const [pickerProvider, setPickerProvider] = useState<Provider | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastType, setToastType] = useState<"error" | "success">("error");
 
   const fetchSummary = useCallback(async () => {
     try {
@@ -886,14 +1610,94 @@ export function ModelsView() {
       const data: SummaryResponse = await res.json();
       setSummary(data);
     } catch {
-      // Silently ignore — next poll will retry
+      // Next poll will retry
     }
   }, []);
 
-  useSmartPoll(fetchSummary, { intervalMs: 30000 });
+  const fetchAgents = useCallback(async () => {
+    setLoadingAgents(true);
+    try {
+      const res = await fetch("/api/agents", {
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setAgentsData({
+        agents: (data.agents ?? []) as AgentFull[],
+        defaultModel: (data.defaultModel ?? "") as string,
+        defaultFallbacks: (data.defaultFallbacks ?? []) as string[],
+      });
+    } catch {
+      // Silently ignore
+    } finally {
+      setLoadingAgents(false);
+    }
+  }, []);
 
-  function showToast(msg: string) {
+  const fetchModelsForAllProviders = useCallback(async (providers: string[]) => {
+    if (providers.length === 0) {
+      setGroupedModels([]);
+      return;
+    }
+    setLoadingModels(true);
+    try {
+      const results = await Promise.allSettled(
+        providers.map(async (pid) => {
+          const res = await fetch("/api/models", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "list-models", provider: pid }),
+            signal: AbortSignal.timeout(10000),
+          });
+          const data = await res.json();
+          const providerMeta = findProvider(pid);
+          const label = providerMeta?.name ?? getProviderDisplayName(pid);
+          return {
+            providerId: pid,
+            providerLabel: label,
+            models: (data.ok ? (data.models ?? []) : []) as ModelItem[],
+          };
+        })
+      );
+
+      const groups: GroupedModel[] = results
+        .filter((r): r is PromiseFulfilledResult<GroupedModel> => r.status === "fulfilled")
+        .map((r) => r.value)
+        .filter((g) => g.models.length > 0);
+
+      setGroupedModels(groups);
+    } finally {
+      setLoadingModels(false);
+    }
+  }, []);
+
+  // Fetch summary on mount and poll every 30s
+  useEffect(() => {
+    console.log("[ModelsView] CLIENT mount effect — calling fetchSummary");
+    void fetchSummary();
+    const timer = setInterval(() => void fetchSummary(), 30000);
+    return () => clearInterval(timer);
+  }, [fetchSummary]);
+
+  // Fetch agents once on mount, then refresh on demand
+  useEffect(() => {
+    void fetchAgents();
+  }, [fetchAgents]);
+
+  // When providers change, refresh model list
+  const prevProviders = useRef<string>("");
+  useEffect(() => {
+    const providers = summary?.configuredProviders ?? [];
+    const key = providers.slice().sort().join(",");
+    if (key !== prevProviders.current) {
+      prevProviders.current = key;
+      void fetchModelsForAllProviders(providers);
+    }
+  }, [summary?.configuredProviders, fetchModelsForAllProviders]);
+
+  function showToast(msg: string, type: "error" | "success" = "error") {
     setToastMessage(msg);
+    setToastType(type);
     setTimeout(() => setToastMessage(null), 4000);
   }
 
@@ -907,18 +1711,15 @@ export function ModelsView() {
       });
       if (!res.ok) throw new Error("Failed");
       await fetchSummary();
+      showToast("Provider removed", "success");
     } catch {
       showToast("Could not remove provider. Try again.");
     }
   }
 
-  function handlePickerClose() {
-    setPickerProvider(null);
-    void fetchSummary();
-  }
-
   function handleWizardDone() {
     void fetchSummary();
+    void fetchAgents();
   }
 
   function openProviderWizard(providerId?: string) {
@@ -931,135 +1732,100 @@ export function ModelsView() {
     setWizardProviderId(null);
   }
 
+  function handleRefreshAll() {
+    void fetchSummary();
+    void fetchAgents();
+  }
+
   const configuredProviders = summary?.configuredProviders ?? [];
   const primaryModel = summary?.defaults?.primary ?? null;
-  const unconnectedProviders = PROVIDERS.filter((p) => !configuredProviders.includes(p.id));
+  const fallbacks = summary?.defaults?.fallbacks ?? [];
+  const agents = agentsData?.agents ?? [];
+  const defaultModel = agentsData?.defaultModel ?? primaryModel ?? "";
+  const defaultFallbacks = agentsData?.defaultFallbacks ?? fallbacks;
+
+  const isLoading = summary === null;
 
   return (
     <>
       <SectionLayout>
         <SectionHeader
           title="AI Model"
-          description="Connect your AI provider and choose which model powers your assistant."
+          description="Configure which models power your agents."
           bordered
-          actions={
-            configuredProviders.length > 0 ? (
-              <button
-                type="button"
-                  onClick={() => openProviderWizard()}
-                className="flex items-center gap-1.5 rounded-lg bg-[#34d399] px-3 py-2 text-sm font-semibold text-[#0d1117] transition-all hover:bg-[#2dbe8c]"
-              >
-                <Plus className="h-4 w-4 shrink-0" />
-                Add provider
-              </button>
-            ) : null
-          }
         />
 
         <SectionBody width="content" padding="regular">
-          <div className="space-y-6">
-            {/* Active model banner — only show after data loads */}
-            {summary !== null && (
-              <ActiveModelBanner model={primaryModel} onAddProvider={() => openProviderWizard()} />
-            )}
+          {isLoading ? (
+            <div className="space-y-4">
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  className="h-40 animate-pulse rounded-xl border border-[#2c343d] bg-[#15191d]"
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {/* No providers at all — show big empty state */}
+              {configuredProviders.length === 0 && (
+                <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-[#2c343d] py-16 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-[#2c343d] bg-[#15191d]">
+                    <Key className="h-6 w-6 text-[#3d4752]" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-[#f5f7fa]">No providers connected yet</p>
+                    <p className="mt-1 max-w-xs text-xs leading-relaxed text-[#7a8591]">
+                      Add an AI provider API key to get started. Your key is stored securely on this device.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => openProviderWizard()}
+                    className="flex items-center gap-2 rounded-lg bg-[#34d399] px-4 py-2.5 text-sm font-semibold text-[#0d1117] transition-all hover:bg-[#2dbe8c]"
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                    Add your first provider
+                  </button>
+                </div>
+              )}
 
-            {/* Connected providers */}
-            {configuredProviders.length > 0 && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xs font-semibold uppercase tracking-wider text-[#7a8591]">
-                    Connected providers
-                  </h2>
-                  <span className="rounded-full border border-[#2c343d] bg-[#20252a] px-2 py-0.5 text-[11px] font-medium text-[#7a8591]">
-                    {configuredProviders.length}
-                  </span>
-                </div>
-                <div className="space-y-3">
-                  {configuredProviders.map((pid) => (
-                    <ProviderCard
-                      key={pid}
-                      providerId={pid}
-                      currentModel={primaryModel}
-                      onPickModel={() => {
-                        const p = findProvider(pid) ?? {
-                          id: pid,
-                          name: pid,
-                          hint: "",
-                          keyPrefix: "",
-                          url: "",
-                        };
-                        setPickerProvider(p);
-                      }}
-                      onRemove={() => void handleRemoveProvider(pid)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
+              {/* Section 1: Default Model */}
+              {configuredProviders.length > 0 && (
+                <DefaultModelCard
+                  primaryModel={primaryModel}
+                  fallbacks={fallbacks}
+                  groupedModels={groupedModels}
+                  loadingModels={loadingModels}
+                  onRefresh={handleRefreshAll}
+                  onAddProvider={() => openProviderWizard()}
+                  hasProviders={configuredProviders.length > 0}
+                />
+              )}
 
-            {/* Loading skeleton */}
-            {summary === null && (
-              <div className="space-y-3">
-                {[0, 1].map((i) => (
-                  <div
-                    key={i}
-                    className="h-20 animate-pulse rounded-xl border border-[#2c343d] bg-[#15191d]"
-                  />
-                ))}
-              </div>
-            )}
+              {/* Section 2: Agent Models */}
+              {configuredProviders.length > 0 && (
+                <AgentModelsCard
+                  agents={agents}
+                  defaultModel={defaultModel}
+                  defaultFallbacks={defaultFallbacks}
+                  groupedModels={groupedModels}
+                  loadingModels={loadingModels}
+                  loadingAgents={loadingAgents}
+                  onRefresh={handleRefreshAll}
+                />
+              )}
 
-            {/* Empty state */}
-            {summary !== null && configuredProviders.length === 0 && (
-              <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-[#2c343d] py-16 text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-[#2c343d] bg-[#15191d]">
-                  <Key className="h-6 w-6 text-[#3d4752]" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-[#f5f7fa]">No providers connected yet</p>
-                  <p className="mt-1 max-w-xs text-xs leading-relaxed text-[#7a8591]">
-                    Add an AI provider API key to get started. Your key is stored securely on this
-                    device.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => openProviderWizard()}
-                  className="flex items-center gap-2 rounded-lg bg-[#34d399] px-4 py-2.5 text-sm font-semibold text-[#0d1117] transition-all hover:bg-[#2dbe8c]"
-                >
-                  <Plus className="h-4 w-4 shrink-0" />
-                  Add your first provider
-                </button>
-              </div>
-            )}
-
-            {/* Available (not yet connected) providers grid */}
-            {configuredProviders.length > 0 && unconnectedProviders.length > 0 && (
-              <div className="space-y-3">
-                <h2 className="text-xs font-semibold uppercase tracking-wider text-[#7a8591]">
-                  Available providers
-                </h2>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-                  {unconnectedProviders.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => openProviderWizard(p.id)}
-                      className="group flex flex-col items-start gap-2 rounded-xl border border-[#2c343d] bg-[#15191d] p-3 text-left transition-all hover:border-[#3d4752] hover:bg-[#1d2227]"
-                    >
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#2c343d] bg-[#20252a] text-xs font-bold text-[#a8b0ba]">
-                        {p.name.charAt(0)}
-                      </div>
-                      <div>
-                        <p className="text-xs font-semibold text-[#d6dce3]">{p.name}</p>
-                        <p className="text-[10px] text-[#7a8591]">{p.hint}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+              {/* Section 3: Providers */}
+              <ProvidersCard
+                configuredProviders={configuredProviders}
+                agents={agents}
+                onAddProvider={(pid) => openProviderWizard(pid)}
+                onManageProvider={(pid) => openProviderWizard(pid)}
+                onRemoveProvider={(pid) => void handleRemoveProvider(pid)}
+              />
+            </div>
+          )}
         </SectionBody>
       </SectionLayout>
 
@@ -1072,19 +1838,9 @@ export function ModelsView() {
         />
       )}
 
-      {/* Model picker modal (triggered from provider card) */}
-      {pickerProvider && (
-        <ModelPickerModal
-          provider={pickerProvider}
-          currentModel={primaryModel}
-          onClose={handlePickerClose}
-          onSelect={handlePickerClose}
-        />
-      )}
-
-      {/* Error toast */}
+      {/* Toast */}
       {toastMessage && (
-        <Toast message={toastMessage} onClose={() => setToastMessage(null)} />
+        <Toast message={toastMessage} type={toastType} onClose={() => setToastMessage(null)} />
       )}
     </>
   );

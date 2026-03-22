@@ -5,6 +5,7 @@ import { join, dirname } from "path";
 import { getDefaultWorkspaceSync, getOpenClawHome, getSystemSkillsDir } from "@/lib/paths";
 import { gatewayCall, runCliJson } from "@/lib/openclaw";
 import { buildModelsSummary } from "@/lib/models-summary";
+import { gatewayConfigPatch } from "@/lib/gateway-config";
 import { PROVIDER_ENV_KEYS } from "@/lib/provider-auth";
 
 export const dynamic = "force-dynamic";
@@ -1130,13 +1131,12 @@ export async function POST(request: NextRequest) {
     try {
       const cfg = await gatewayCall<GatewayConfigGet>("config.get", undefined, 15000);
       const baseHash = String(cfg?.hash || "");
-      await gatewayCall(
-        "config.patch",
+      await gatewayConfigPatch(
         {
           raw: JSON.stringify({ env: { [key]: value } }),
           baseHash,
         },
-        20000
+        20000,
       );
     } catch (rpcErr) {
       console.warn("[accounts] update-env-key: gateway RPC failed, writing to disk:", rpcErr);

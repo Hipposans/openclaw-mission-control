@@ -30,8 +30,13 @@ export function CliModeBanner() {
     setDismissed(true);
   }, []);
 
+  // In AgentBay hosted mode, CLI is the expected transport — no warning needed.
+  // The gateway only exposes sessions_list/agents_list via HTTP; exec/read/write
+  // require CLI, so AutoTransport always settles into CLI mode. This is correct.
+  const isHosted = process.env.NEXT_PUBLIC_AGENTBAY_HOSTED === "true";
+
   // Only render once we know the transport mode and the user hasn't dismissed
-  if (!initialCheckDone || transport !== "cli" || dismissed) return null;
+  if (isHosted || !initialCheckDone || transport !== "cli" || dismissed) return null;
 
   const isForcedCli = transportReason === "forced_cli" || transportConfigured === "cli";
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { gatewayCall } from "@/lib/openclaw";
 import { getOpenClawBin, getGatewayUrl } from "@/lib/paths";
+import { gatewayConfigPatch } from "@/lib/gateway-config";
 import { logRequest, logError } from "@/lib/request-log";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -46,8 +47,7 @@ function ensureResponsesEndpoint(): void {
         return;
       }
 
-      await gatewayCall(
-        "config.patch",
+      await gatewayConfigPatch(
         {
           raw: JSON.stringify({
             gateway: { http: { endpoints: { responses: { enabled: true } } } },
@@ -126,11 +126,18 @@ type GatewayPayload = {
 };
 
 const GATEWAY_RESPONSE_TTL_MS = 2500;
-let gatewayResponseCache: { payload: GatewayPayload; expiresAt: number } | null = null;
+const GATEWAY_MAX_STALE_MS = 60000;
+let gatewayResponseCache: { payload: GatewayPayload; expiresAt: number; fetchedAt: number } | null = null;
 let gatewayResponseInFlight: Promise<GatewayPayload> | null = null;
 
 function getCachedGatewayPayload(now = Date.now()): GatewayPayload | null {
   if (!gatewayResponseCache || gatewayResponseCache.expiresAt <= now) return null;
+  return gatewayResponseCache.payload;
+}
+
+function getStaleCachedGatewayPayload(now = Date.now()): GatewayPayload | null {
+  if (!gatewayResponseCache) return null;
+  if (now >= gatewayResponseCache.fetchedAt + GATEWAY_MAX_STALE_MS) return null;
   return gatewayResponseCache.payload;
 }
 
@@ -197,9 +204,11 @@ export async function GET() {
     if (!gatewayResponseInFlight) {
       gatewayResponseInFlight = computeGatewayPayload()
         .then((payload) => {
+          const writtenAt = Date.now();
           gatewayResponseCache = {
             payload,
-            expiresAt: Date.now() + GATEWAY_RESPONSE_TTL_MS,
+            expiresAt: writtenAt + GATEWAY_RESPONSE_TTL_MS,
+            fetchedAt: writtenAt,
           };
           return payload;
         })
@@ -213,12 +222,25 @@ export async function GET() {
       gateway: payload.status,
       coalesced: joinedInFlight,
     });
-    return NextResponse.json(payload);
+    return NextResponse.json({ ...payload, stale: false });
   } catch (err) {
     logError("/api/gateway", err, { phase: "get" });
+
+    // Serve stale cache during gateway restart window rather than erroring.
+    const stale = getStaleCachedGatewayPayload(start);
+    if (stale) {
+      logRequest("/api/gateway", 200, Date.now() - start, {
+        gateway: stale.status,
+        stale: true,
+      });
+      return NextResponse.json({ ...stale, stale: true, restarting: true });
+    }
+
     return NextResponse.json({
       status: "offline",
       health: { ok: false, error: "Gateway health check failed" },
+      stale: true,
+      restarting: true,
     });
   }
 }

@@ -382,11 +382,13 @@ export function OnboardingWizard({ onComplete }: Props) {
     }
   }, []);
 
-  useSmartPoll(fetchPairing, { intervalMs: 5000, enabled: step === 3 });
-
-  // Fetch pairing requests immediately when entering step 3 so the list is not empty on first paint
+  // Poll for pairing requests every 5s when on step 3
+  // Note: useSmartPoll has reliability issues in dev/Turbopack — use direct interval
   useEffect(() => {
-    if (step === 3) void fetchPairing();
+    if (step !== 3) return;
+    void fetchPairing();
+    const timer = setInterval(() => void fetchPairing(), 5000);
+    return () => clearInterval(timer);
   }, [step, fetchPairing]);
 
   useEffect(() => {

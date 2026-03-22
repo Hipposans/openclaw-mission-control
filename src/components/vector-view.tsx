@@ -5,8 +5,8 @@ import {
   Database, Search, RefreshCw, ChevronDown, ChevronUp, Check,
   AlertTriangle, X, FileText, Hash, Cpu, HardDrive,
   Layers, RotateCcw, Activity, Filter, ArrowUpDown, Eye, Copy,
-  Box, BarChart3, CircleDot, Pencil, Save, Lock, KeyRound,
-  Zap, Trash2, ExternalLink,
+  Box, BarChart3, CircleDot, Lock, KeyRound,
+  Trash2, ExternalLink, Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SectionBody, SectionHeader, SectionLayout } from "@/components/section-layout";
@@ -35,20 +35,67 @@ type SearchResult = { path: string; startLine: number; endLine: number; score: n
 type VectorDocOption = { path: string; selected: boolean; source: "workspace" | "custom" };
 type Toast = { message: string; type: "success" | "error" };
 
-const EMBEDDING_MODELS: { provider: string; model: string; dims: number; label: string }[] = [
-  { provider: "openai", model: "text-embedding-3-small", dims: 1536, label: "OpenAI text-embedding-3-small" },
-  { provider: "openai", model: "text-embedding-3-large", dims: 3072, label: "OpenAI text-embedding-3-large" },
-  { provider: "openai", model: "text-embedding-ada-002", dims: 1536, label: "OpenAI Ada 002 (legacy)" },
-  { provider: "google", model: "text-embedding-004", dims: 768, label: "Google text-embedding-004" },
-  { provider: "voyage", model: "voyage-3-large", dims: 1024, label: "Voyage 3 Large" },
-  { provider: "voyage", model: "voyage-3", dims: 1024, label: "Voyage 3" },
-  { provider: "voyage", model: "voyage-code-3", dims: 1024, label: "Voyage Code 3" },
-  { provider: "cohere", model: "embed-v4.0", dims: 1024, label: "Cohere Embed v4" },
-  { provider: "cohere", model: "embed-english-v3.0", dims: 1024, label: "Cohere English v3" },
-];
-
-/** Default local embedding model (auto-downloads on first use, ~0.6 GB). See https://docs.openclaw.ai/concepts/memory#vector-memory-search */
+/** Default local embedding model (auto-downloads on first use, ~0.6 GB). */
 const DEFAULT_LOCAL_MODEL_PATH = "hf:ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/embeddinggemma-300m-qat-Q8_0.gguf";
+
+type ProviderCard = {
+  id: string;
+  provider: string;
+  model: string;
+  dims: number;
+  label: string;
+  sublabel: string;
+  description: string;
+  requiresKey: string | null;
+  icon: string;
+};
+
+const PROVIDER_CARDS: ProviderCard[] = [
+  {
+    id: "openai",
+    provider: "openai",
+    model: "text-embedding-3-small",
+    dims: 1536,
+    label: "OpenAI",
+    sublabel: "text-embedding-3-small · 1536d",
+    description: "Best quality. Uses your OpenAI API key.",
+    requiresKey: "openai",
+    icon: "circle",
+  },
+  {
+    id: "openai-large",
+    provider: "openai",
+    model: "text-embedding-3-large",
+    dims: 3072,
+    label: "OpenAI (Large)",
+    sublabel: "text-embedding-3-large · 3072d",
+    description: "Higher quality, more expensive.",
+    requiresKey: "openai",
+    icon: "circle",
+  },
+  {
+    id: "local",
+    provider: "local",
+    model: "auto",
+    dims: 0,
+    label: "Local (Offline)",
+    sublabel: "EmbeddingGemma · Runs on device",
+    description: "Free, no API key. Downloads ~600MB model on first use.",
+    requiresKey: null,
+    icon: "laptop",
+  },
+  {
+    id: "google",
+    provider: "google",
+    model: "text-embedding-004",
+    dims: 768,
+    label: "Google Gemini",
+    sublabel: "text-embedding-004 · 768d",
+    description: "Free tier available.",
+    requiresKey: "google",
+    icon: "circle-blue",
+  },
+];
 
 function formatBytes(b: number): string {
   if (b >= 1073741824) return (b / 1073741824).toFixed(1) + " GB";
@@ -65,6 +112,16 @@ function ToastBar({ toast, onDone }: { toast: Toast; onDone: () => void }) {
     <div className={cn("fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg border px-4 py-2.5 text-sm font-medium shadow-xl backdrop-blur-sm", toast.type === "success" ? "border-emerald-500/30 bg-emerald-950/80 text-emerald-300" : "border-red-500/30 bg-red-950/80 text-red-300")}>
       <div className="flex items-center gap-2">{toast.type === "success" ? <Check className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}{toast.message}</div>
     </div>
+  );
+}
+
+function Dots() {
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:0ms]" />
+      <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:150ms]" />
+      <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:300ms]" />
+    </span>
   );
 }
 
@@ -159,14 +216,14 @@ function AgentIndexCard({
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => onReindex(agent.agentId, false)} disabled={reindexing || deleting} className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-50 dark:border-[#2c343d] dark:bg-[#20252a] dark:text-[#d6dce3] dark:hover:bg-[#232a31]">
-            {reindexing ? <span className="inline-flex items-center gap-0.5"><span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:0ms]" /><span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:150ms]" /><span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:300ms]" /></span> : <RefreshCw className="h-3 w-3" />}Reindex
+            {reindexing ? <Dots /> : <RefreshCw className="h-3 w-3" />}Reindex
           </button>
           <button
             onClick={() => onDelete(agent.agentId)}
             disabled={reindexing || deleting}
             className="flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-500/10 disabled:opacity-50"
           >
-            {deleting ? <span className="inline-flex items-center gap-0.5"><span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:0ms]" /><span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:150ms]" /><span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:300ms]" /></span> : <Trash2 className="h-3 w-3" />}
+            {deleting ? <Dots /> : <Trash2 className="h-3 w-3" />}
             Delete
           </button>
           <button onClick={() => setExpanded(!expanded)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-stone-100 hover:text-stone-900 dark:hover:bg-[#20252a] dark:hover:text-[#f5f7fa]">
@@ -214,558 +271,218 @@ function AgentIndexCard({
   );
 }
 
-type EmbeddingOptions = { localModelPath?: string; fallback?: string; cacheEnabled?: boolean };
+/* ── Provider Icon ───────────────────────────────── */
 
-function EmbeddingModelEditor({
-  currentProvider,
-  currentModel,
-  currentDims,
-  currentBackend,
-  memorySearch,
-  onSave,
-  saving,
-}: {
-  currentProvider: string;
-  currentModel: string;
-  currentDims: number | null;
-  currentBackend: string;
-  memorySearch: Record<string, unknown> | null;
-  onSave: (p: string, m: string, options?: EmbeddingOptions) => void;
-  saving: boolean;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [provider, setProvider] = useState(currentProvider);
-  const [model, setModel] = useState(currentModel);
-  const currentLocalModelPath = useMemo(() => {
-    const local = memorySearch?.local as Record<string, unknown> | undefined;
-    return (local?.modelPath as string) || "";
-  }, [memorySearch]);
-  const currentFallback = useMemo(() => (memorySearch?.fallback as string) || "none", [memorySearch]);
-  const currentCacheEnabled = useMemo(() => {
-    const c = memorySearch?.cache as Record<string, unknown> | undefined;
-    return c?.enabled !== false;
-  }, [memorySearch]);
-  const [localModelPath, setLocalModelPath] = useState(() => {
-    const local = memorySearch?.local as Record<string, unknown> | undefined;
-    return (local?.modelPath as string) || "";
-  });
-  const [fallback, setFallback] = useState(() => (memorySearch?.fallback as string) || "none");
-  const [cacheEnabled, setCacheEnabled] = useState(() => {
-    const c = memorySearch?.cache as Record<string, unknown> | undefined;
-    return c?.enabled !== false;
-  });
-  const [authProviders, setAuthProviders] = useState<Set<string>>(new Set());
-  const [authLoading, setAuthLoading] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const preset = EMBEDDING_MODELS.find((m) => m.provider === provider && m.model === model);
-  const localPathChanged =
-    provider === "local" && localModelPath.trim() !== currentLocalModelPath.trim();
-  const fallbackChanged = fallback !== currentFallback;
-  const cacheChanged = cacheEnabled !== currentCacheEnabled;
-  const modelChanged = provider.trim() !== currentProvider || model.trim() !== currentModel;
-  const hasChanges = modelChanged || localPathChanged || fallbackChanged || cacheChanged;
-
-  useEffect(() => {
-    if (!editing) {
-      setProvider(currentProvider);
-      setModel(currentModel);
-      setLocalModelPath(currentLocalModelPath);
-      setFallback(currentFallback);
-      setCacheEnabled(currentCacheEnabled);
-    }
-  }, [
-    editing,
-    currentProvider,
-    currentModel,
-    currentLocalModelPath,
-    currentFallback,
-    currentCacheEnabled,
-  ]);
-
-  // Fetch authenticated providers when editor opens
-  useEffect(() => {
-    if (!editing) return;
-    queueMicrotask(() => setAuthLoading(true));
-    (async () => {
-      try {
-        const res = await fetch("/api/models", { signal: AbortSignal.timeout(10000) });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const providers = new Set<string>();
-        // Extract providers that have auth configured
-        const authList = data?.status?.auth?.providers ?? [];
-        for (const p of authList) {
-          if (p.effective) providers.add(p.provider);
-        }
-        // Always include the current provider
-        if (currentProvider) providers.add(currentProvider);
-        setAuthProviders(providers);
-      } catch {
-        // If we can't check, show all models
-        setAuthProviders(new Set(EMBEDDING_MODELS.map((m) => m.provider)));
-      }
-      setAuthLoading(false);
-    })();
-  }, [editing, currentProvider]);
-
-  // Local is always available (no API key). Remote providers need auth.
-  const availableModels = useMemo(
-    () => EMBEDDING_MODELS.filter((m) => authProviders.has(m.provider)),
-    [authProviders]
-  );
-  const lockedModels = useMemo(
-    () => EMBEDDING_MODELS.filter((m) => m.provider !== "local" && !authProviders.has(m.provider)),
-    [authProviders]
-  );
-  if (!editing) return (
-    <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-[#2c343d] dark:bg-[#171a1d]">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm font-semibold text-foreground/90"><Cpu className="h-4 w-4 text-stone-700 dark:text-[#d6dce3]" />Index Control Plane</div>
-        <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-100 dark:border-[#2c343d] dark:bg-[#20252a] dark:text-[#d6dce3] dark:hover:bg-[#232a31]"><Pencil className="h-3 w-3" />Change</button>
-      </div>
-      <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="rounded-lg border border-foreground/5 bg-muted/50 px-3 py-2"><p className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60">Provider</p><p className="text-sm font-mono text-foreground/90 mt-0.5">{currentProvider}</p></div>
-        <div className="rounded-lg border border-foreground/5 bg-muted/50 px-3 py-2"><p className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60">Model</p><p className="text-sm font-mono text-foreground/90 mt-0.5 truncate" title={currentModel}>{currentModel}</p><p className="mt-1 text-xs text-muted-foreground/70">{currentDims ? `${currentDims}d embeddings` : "\u2014"}</p></div>
-        <div className="rounded-lg border border-foreground/5 bg-muted/50 px-3 py-2"><p className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60">Backend</p><p className="text-sm font-mono text-foreground/90 mt-0.5">{currentBackend || "\u2014"}</p></div>
-      </div>
-      {currentProvider === "local" && (() => {
-        const local = memorySearch?.local as Record<string, unknown> | undefined;
-        const path = local?.modelPath as string | undefined;
-        return path ? <p className="mt-2 text-xs text-muted-foreground/70">Local path: <span className="font-mono truncate block" title={path}>{path}</span></p> : null;
-      })()}
-    </div>
-  );
-
+function ProviderIcon({ icon, isAuth }: { icon: string; isAuth: boolean }) {
+  if (icon === "laptop") {
+    return <span className="text-base" title="Runs on device">💻</span>;
+  }
+  if (icon === "circle-blue") {
+    return (
+      <span className={cn("flex h-3 w-3 rounded-full shrink-0", isAuth ? "bg-blue-400" : "bg-foreground/20")} />
+    );
+  }
+  // default green circle
   return (
-    <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-[#2c343d] dark:bg-[#171a1d] space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm font-semibold text-foreground/90"><Cpu className="h-4 w-4 text-stone-700 dark:text-[#d6dce3]" />Change Embedding Model</div>
-        <button onClick={() => { setEditing(false); setProvider(currentProvider); setModel(currentModel); setLocalModelPath(currentLocalModelPath); setFallback(currentFallback); setCacheEnabled(currentCacheEnabled); }} className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground/70"><X className="h-4 w-4" /></button>
-      </div>
-      <p className="text-xs text-muted-foreground">Changing the embedding model requires a full reindex.</p>
-
-      {/* Available models — from authenticated providers */}
-      {authLoading ? (
-        <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground/60">
-          <span className="inline-flex items-center gap-0.5"><span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:0ms]" /><span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:150ms]" /><span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:300ms]" /></span>Checking authenticated providers...
-        </div>
-      ) : (
-        <>
-          {/* Local (Offline) — always available, no API key */}
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60 mb-1.5">
-              Local (offline)
-            </p>
-            <button
-              type="button"
-              onClick={() => { setProvider("local"); setModel("auto"); }}
-              className={cn(
-                "w-full rounded-lg border px-3 py-2 text-left transition-all",
-                provider === "local"
-                  ? "border-emerald-500/30 bg-emerald-500/10"
-                  : "border-stone-200 bg-stone-50 hover:border-stone-300 dark:border-[#2c343d] dark:bg-[#15191d]"
-              )}
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-lg" title="Runs on device">💻</span>
-                <div>
-                  <span className={cn("text-xs font-medium", provider === "local" ? "text-emerald-700 dark:text-emerald-300" : "text-foreground/70")}>Local (Offline)</span>
-                  {currentProvider === "local" && provider === "local" && <span className="ml-2 rounded bg-emerald-500/20 px-1 py-0.5 text-xs text-emerald-400">CURRENT</span>}
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground/60 mt-0.5">No API key. Model auto-downloads on first use (~0.6 GB).</p>
-            </button>
-          </div>
-
-          {availableModels.length > 0 && (
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60 mb-1.5">
-                Available (remote)
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                {availableModels.map((m) => {
-                  const sel = m.provider === provider && m.model === model;
-                  const cur = m.provider === currentProvider && m.model === currentModel;
-                  return (
-                    <button
-                      key={m.provider + "/" + m.model}
-                      onClick={() => { setProvider(m.provider); setModel(m.model); }}
-                      className={cn(
-                        "rounded-lg border px-3 py-2 text-left transition-all",
-                        sel
-                          ? "border-emerald-500/30 bg-emerald-500/10"
-                          : "border-stone-200 bg-stone-50 hover:border-stone-300 dark:border-[#2c343d] dark:bg-[#15191d]"
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={cn("text-xs font-medium", sel ? "text-emerald-700 dark:text-emerald-300" : "text-foreground/70")}>{m.label}</span>
-                        {cur && <span className="rounded bg-emerald-500/20 px-1 py-0.5 text-xs text-emerald-400">CURRENT</span>}
-                      </div>
-                      <p className="text-xs text-muted-foreground/60 mt-0.5">{m.dims}d &middot; {m.provider}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Locked models — providers not authenticated */}
-          {lockedModels.length > 0 && (
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground/40 mb-1.5 flex items-center gap-1">
-                <Lock className="h-3 w-3" />
-                Requires Authentication
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 opacity-50">
-                {lockedModels.map((m) => (
-                  <div
-                    key={m.provider + "/" + m.model}
-                    className="rounded-lg border border-foreground/5 bg-foreground/5 px-3 py-2 text-left"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Lock className="h-3 w-3 shrink-0 text-muted-foreground/40" />
-                      <span className="text-xs font-medium text-muted-foreground/60">{m.label}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground/40 mt-0.5">{m.dims}d &middot; {m.provider}</p>
-                  </div>
-                ))}
-              </div>
-
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Local model path — when using local provider */}
-      {provider === "local" && (
-        <div className="space-y-2 rounded-lg border border-stone-200 bg-stone-50 p-3 dark:border-[#2c343d] dark:bg-[#15191d]">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60">Local model path</p>
-          <input
-            value={localModelPath}
-            onChange={(e) => setLocalModelPath(e.target.value)}
-            placeholder={DEFAULT_LOCAL_MODEL_PATH}
-            aria-label="Local model path"
-            className="w-full rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 font-mono text-xs text-stone-900 outline-none focus:border-emerald-500/30 dark:border-[#2c343d] dark:bg-[#15191d] dark:text-[#f5f7fa]"
-          />
-          <p className="text-xs text-muted-foreground/70">
-            Leave empty to use the default (EmbeddingGemma, ~0.6 GB). Use a path to a GGUF file or an <code className="rounded bg-muted px-1">hf:...</code> URI. The model auto-downloads on first use. See{" "}
-            <a href="https://docs.openclaw.ai/concepts/memory#vector-memory-search" target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200">docs</a>.
-          </p>
-        </div>
-      )}
-
-      {/* Advanced: fallback + cache */}
-      <div className="space-y-2">
-        <button
-          type="button"
-          onClick={() => setShowAdvanced(!showAdvanced)}
-          className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground/60 hover:text-foreground/70"
-        >
-          {showAdvanced ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-          Advanced
-        </button>
-        {showAdvanced && (
-          <div className="grid grid-cols-1 gap-3 rounded-lg border border-stone-200 bg-stone-50 p-3 dark:border-[#2c343d] dark:bg-[#15191d] sm:grid-cols-2">
-            <label className="space-y-1">
-              <span className="text-xs text-muted-foreground">Fallback provider</span>
-              <select value={fallback} onChange={(e) => setFallback(e.target.value)} className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs text-stone-900 outline-none focus:border-emerald-500/30 dark:border-[#2c343d] dark:bg-[#171a1d] dark:text-[#f5f7fa]">
-                <option value="none">None</option>
-                <option value="openai">OpenAI</option>
-                <option value="gemini">Gemini</option>
-                <option value="local">Local</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-2 pt-6">
-              <input type="checkbox" checked={cacheEnabled} onChange={(e) => setCacheEnabled(e.target.checked)} className="rounded border-foreground/20" />
-              <span className="text-xs text-muted-foreground">Embedding cache (faster reindex)</span>
-            </label>
-          </div>
-        )}
-      </div>
-
-      {/* Custom entry */}
-      <div className="space-y-2">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60">Or enter custom</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <input value={provider} onChange={(e) => setProvider(e.target.value)} aria-label="Custom embedding provider" className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-900 outline-none focus:border-emerald-500/30 dark:border-[#2c343d] dark:bg-[#15191d] dark:text-[#f5f7fa]" placeholder="Provider" />
-          <input value={model} onChange={(e) => setModel(e.target.value)} aria-label="Custom embedding model" className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-900 outline-none focus:border-emerald-500/30 dark:border-[#2c343d] dark:bg-[#15191d] dark:text-[#f5f7fa]" placeholder="Model" />
-        </div>
-      </div>
-
-      {/* Reindex warning */}
-      {hasChanges && (
-        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2">
-          <p className="flex items-center gap-1.5 text-xs text-amber-300"><AlertTriangle className="h-3 w-3" />Changes to embedding config can require reindexing for complete results.{modelChanged ? " Existing embeddings may be replaced." : ""}{preset && currentDims && preset.dims !== currentDims && " Vector dimensions will change."}</p>
-        </div>
-      )}
-
-      {/* Actions */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => {
-            const options: EmbeddingOptions = {};
-            if (provider === "local") options.localModelPath = localModelPath.trim();
-            options.fallback = fallback;
-            options.cacheEnabled = cacheEnabled;
-            onSave(provider, model, options);
-            setEditing(false);
-          }}
-          disabled={saving || !provider.trim() || !model.trim() || !hasChanges}
-          className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-xs font-medium hover:bg-primary/90 disabled:opacity-50"
-        >
-          {saving ? <span className="inline-flex items-center gap-0.5"><span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:0ms]" /><span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:150ms]" /><span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:300ms]" /></span> : <Save className="h-3.5 w-3.5" />}Save & Reindex
-        </button>
-        <button onClick={() => { setEditing(false); setProvider(currentProvider); setModel(currentModel); setLocalModelPath(currentLocalModelPath); setFallback(currentFallback); setCacheEnabled(currentCacheEnabled); }} className="rounded-lg px-3 py-2 text-xs text-muted-foreground hover:text-foreground/90">Cancel</button>
-      </div>
-    </div>
+    <span className={cn("flex h-3 w-3 rounded-full shrink-0", isAuth ? "bg-emerald-400" : "bg-foreground/20")} />
   );
 }
 
-/* ── Setup Wizard ────────────────────────────────── */
+/* ── Provider Cards Section ──────────────────────── */
 
-type SetupProvider = { id: string; provider: string; model: string; dims: number; label: string; description: string; needsKey: string; icon: string };
-
-const SETUP_OPTIONS: SetupProvider[] = [
-  { id: "openai", provider: "openai", model: "text-embedding-3-small", dims: 1536, label: "OpenAI", description: "Best quality, widely used. Requires OPENAI_API_KEY.", needsKey: "OPENAI_API_KEY", icon: "🟢" },
-  { id: "openai-large", provider: "openai", model: "text-embedding-3-large", dims: 3072, label: "OpenAI (Large)", description: "Higher quality, 3072 dimensions. More expensive.", needsKey: "OPENAI_API_KEY", icon: "🟢" },
-  { id: "google", provider: "google", model: "text-embedding-004", dims: 768, label: "Google Gemini", description: "Free tier available. Requires GEMINI_API_KEY.", needsKey: "GEMINI_API_KEY", icon: "🔵" },
-  { id: "local", provider: "local", model: "auto", dims: 0, label: "Local (Offline)", description: "Runs on your device. No API key needed. Downloads ~600MB model.", needsKey: "", icon: "💻" },
-];
-
-function SetupWizard({
+function ProviderCards({
   authProviders,
-  onSetup,
-  onSaveOpenAiKey,
-  savingOpenAiKey,
+  activeProvider,
+  activeModel,
+  onEnable,
+  onSaveGoogleKey,
   busy,
+  busyId,
 }: {
   authProviders: string[];
-  onSetup: (provider: string, model: string, options?: { localModelPath?: string }) => void;
-  onSaveOpenAiKey: (apiKey: string) => Promise<boolean>;
-  savingOpenAiKey: boolean;
+  activeProvider: string;
+  activeModel: string;
+  onEnable: (card: ProviderCard, apiKey?: string) => void;
+  onSaveGoogleKey: (key: string) => Promise<boolean>;
   busy: boolean;
+  busyId: string | null;
 }) {
-  const [selected, setSelected] = useState<string | null>(null);
-  const [customProvider, setCustomProvider] = useState("");
-  const [customModel, setCustomModel] = useState("");
-  const [localModelPath, setLocalModelPath] = useState("");
-  const [openAiKey, setOpenAiKey] = useState("");
-
-  // Auto-select best available option
-  useEffect(() => {
-    if (selected) return;
-    queueMicrotask(() => {
-      if (authProviders.includes("openai")) { setSelected("openai"); return; }
-      if (authProviders.includes("google")) { setSelected("google"); return; }
-      setSelected("local");
-    });
-  }, [authProviders, selected]);
-
-  const recommended = SETUP_OPTIONS.find((o) => {
-    if (authProviders.includes("openai")) return o.id === "openai";
-    if (authProviders.includes("google")) return o.id === "google";
-    return o.id === "local";
-  });
+  const [googleKey, setGoogleKey] = useState("");
+  const [savingGoogleKey, setSavingGoogleKey] = useState(false);
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-4 py-8">
-      <div className="w-full max-w-xl space-y-6">
-        {/* Hero */}
-        <div className="text-center space-y-3">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-stone-100 dark:bg-[#20252a]">
-            <Database className="h-8 w-8 text-stone-700 dark:text-[#d6dce3]" />
-          </div>
-          <h1 className="text-sm font-semibold text-foreground">Set Up Vector Memory</h1>
-          <p className="text-sm text-muted-foreground max-w-md mx-auto">
-            Vector memory lets your agents search notes, documents, and knowledge semantically.
-            Pick an embedding provider to get started — it takes one click.
-          </p>
-        </div>
+    <div className="space-y-2">
+      {PROVIDER_CARDS.map((card) => {
+        const isActive =
+          card.provider === activeProvider && card.model === activeModel;
+        const isAuth =
+          card.requiresKey === null || authProviders.includes(card.requiresKey);
+        const isThisBusy = busyId === card.id && busy;
+        const needsInlineKey = card.requiresKey === "google" && !authProviders.includes("google");
 
-        {/* Provider cards */}
-        <div className="space-y-2">
-          {SETUP_OPTIONS.map((opt) => {
-            const isAuth = opt.provider === "local" || authProviders.includes(opt.provider);
-            const isSel = selected === opt.id;
-            const isRec = recommended?.id === opt.id;
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => setSelected(opt.id)}
-                disabled={!isAuth}
-                className={cn(
-                  "w-full rounded-xl border p-4 text-left transition-all",
-                  !isAuth
-                    ? "cursor-not-allowed border-foreground/5 bg-foreground/5 opacity-50"
-                    : isSel
-                      ? "border-emerald-500/30 bg-emerald-500/10 scale-105"
-                      : "border-stone-200 bg-white hover:border-stone-300 dark:border-[#2c343d] dark:bg-[#171a1d]"
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-lg">{opt.icon}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className={cn("text-xs font-semibold", isSel ? "text-emerald-700 dark:text-emerald-300" : isAuth ? "text-foreground/90" : "text-foreground/50")}>{opt.label}</p>
-                      {isRec && isAuth && (
-                        <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-300">RECOMMENDED</span>
-                      )}
-                      {isAuth && !isSel && (
-                        <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-400/80">Ready</span>
-                      )}
-                      {!isAuth && (
-                        <span className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                          <Lock className="h-2.5 w-2.5" />No API key
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
-                    {opt.dims > 0 && (
-                      <p className="text-xs text-muted-foreground/50 mt-0.5">
-                        {opt.model} · {opt.dims}d vectors
-                      </p>
-                    )}
-                  </div>
-                  {isSel && isAuth && (
-                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                      <Check className="h-3.5 w-3.5 text-white" />
-                    </div>
+        return (
+          <div
+            key={card.id}
+            className={cn(
+              "rounded-xl border p-4 transition-all",
+              isActive
+                ? "border-emerald-500/40 bg-emerald-500/5 dark:bg-emerald-500/8"
+                : "border-stone-200 bg-white dark:border-[#2c343d] dark:bg-[#171a1d]"
+            )}
+          >
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 shrink-0">
+                <ProviderIcon icon={card.icon} isAuth={isAuth} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2 mb-0.5">
+                  <span className={cn("text-sm font-semibold", isActive ? "text-emerald-700 dark:text-emerald-300" : "text-foreground/90")}>
+                    {card.label}
+                  </span>
+                  {isActive && (
+                    <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-400">
+                      Active
+                    </span>
+                  )}
+                  {!isAuth && !needsInlineKey && (
+                    <span className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                      <Lock className="h-2.5 w-2.5" />No API key
+                    </span>
                   )}
                 </div>
-              </button>
-            );
-          })}
-        </div>
+                <p className="text-xs text-muted-foreground/70 font-mono">{card.sublabel}</p>
+                <p className="text-xs text-muted-foreground mt-1">{card.description}</p>
 
-        {/* OpenAI key quick-connect for embeddings */}
-        {!authProviders.includes("openai") && (
-          <div className="rounded-xl border border-stone-200 bg-white p-3.5 shadow-sm dark:border-[#2c343d] dark:bg-[#171a1d]">
-            <p className="flex items-center gap-2 text-xs font-medium text-foreground/80">
-              <KeyRound className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-300" />
-              Add your OpenAI key for embeddings
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground/70">
-              Create a key at{" "}
-              <a
-                href="https://platform.openai.com/api-keys"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-emerald-700 underline hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200"
-              >
-                platform.openai.com
-                <ExternalLink className="h-2.5 w-2.5" />
-              </a>
-              . ChatGPT Plus does not include API credits.
-            </p>
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-              <input
-                type="password"
-                value={openAiKey}
-                onChange={(e) => setOpenAiKey(e.target.value)}
-                placeholder="sk-..."
-                aria-label="OpenAI API key for embeddings"
-                className="flex-1 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 font-mono text-xs text-stone-900 outline-none focus:border-emerald-500/30 dark:border-[#2c343d] dark:bg-[#15191d] dark:text-[#f5f7fa]"
-              />
-              <button
-                type="button"
-                disabled={savingOpenAiKey || !openAiKey.trim()}
-                onClick={async () => {
-                  const ok = await onSaveOpenAiKey(openAiKey.trim());
-                  if (ok) {
-                    setOpenAiKey("");
-                    setSelected("openai");
-                  }
-                }}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-              >
-                {savingOpenAiKey ? "Saving..." : "Save key"}
-              </button>
+                {/* Inline Google key input */}
+                {needsInlineKey && (
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                    <input
+                      type="password"
+                      value={googleKey}
+                      onChange={(e) => setGoogleKey(e.target.value)}
+                      placeholder="Paste Gemini API key..."
+                      aria-label="Gemini API key"
+                      className="flex-1 rounded-lg border border-stone-200 bg-stone-50 px-3 py-1.5 font-mono text-xs text-stone-900 outline-none focus:border-emerald-500/30 dark:border-[#2c343d] dark:bg-[#15191d] dark:text-[#f5f7fa]"
+                    />
+                    <button
+                      type="button"
+                      disabled={savingGoogleKey || !googleKey.trim() || busy}
+                      onClick={async () => {
+                        setSavingGoogleKey(true);
+                        const ok = await onSaveGoogleKey(googleKey.trim());
+                        setSavingGoogleKey(false);
+                        if (ok) {
+                          setGoogleKey("");
+                          onEnable(card);
+                        }
+                      }}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 whitespace-nowrap"
+                    >
+                      {savingGoogleKey ? <><Dots />Saving...</> : <><Zap className="h-3 w-3" />Enable</>}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Enable button (right side, for cards that don't need inline key) */}
+              {!needsInlineKey && (
+                <button
+                  type="button"
+                  disabled={busy || !isAuth || isActive}
+                  onClick={() => onEnable(card)}
+                  className={cn(
+                    "shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all disabled:opacity-50",
+                    isActive
+                      ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 cursor-default"
+                      : isAuth
+                        ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                        : "border border-stone-200 bg-stone-50 text-stone-400 dark:border-[#2c343d] dark:bg-[#20252a] cursor-not-allowed"
+                  )}
+                >
+                  {isThisBusy ? (
+                    <><Dots />Enabling...</>
+                  ) : isActive ? (
+                    <><Check className="h-3 w-3" />Active</>
+                  ) : (
+                    <><Zap className="h-3 w-3" />Enable</>
+                  )}
+                </button>
+              )}
             </div>
-            <p className="mt-2 text-xs text-muted-foreground/60">
-              CLI alternative: <code className="rounded bg-muted px-1 py-0.5">openclaw onboard --auth-choice openai-api-key</code>
-            </p>
           </div>
-        )}
+        );
+      })}
+    </div>
+  );
+}
 
-        {/* Local model path — when Local is selected */}
-        {selected === "local" && (
-          <div className="rounded-xl border border-stone-200 bg-white p-3.5 shadow-sm dark:border-[#2c343d] dark:bg-[#171a1d] space-y-2">
-            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60">Local model (optional)</p>
-            <input
-              value={localModelPath}
-              onChange={(e) => setLocalModelPath(e.target.value)}
-              placeholder={DEFAULT_LOCAL_MODEL_PATH}
-              aria-label="Local model path (optional)"
-              className="w-full rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 font-mono text-xs text-stone-900 outline-none focus:border-emerald-500/30 dark:border-[#2c343d] dark:bg-[#15191d] dark:text-[#f5f7fa]"
-            />
-            <p className="text-xs text-muted-foreground/70">
-              Leave empty to use the default (auto-downloads ~0.6 GB). Or set a path or <code className="rounded bg-muted px-1">hf:...</code> URI.{" "}
-              <a href="https://docs.openclaw.ai/concepts/memory#vector-memory-search" target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200">Docs</a>
-            </p>
-          </div>
-        )}
+/* ── Current Status Card ─────────────────────────── */
 
-        {/* Or configure manually — always allow setting provider/model via app */}
-        <div className="rounded-xl border border-stone-200 bg-white p-3.5 shadow-sm dark:border-[#2c343d] dark:bg-[#171a1d] space-y-2">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60">Or configure manually</p>
-          <p className="text-xs text-muted-foreground">
-            Enter any embedding provider and model (e.g. after authenticating with the commands above).
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <input
-              value={customProvider}
-              onChange={(e) => setCustomProvider(e.target.value)}
-              placeholder="Provider (e.g. openai)"
-              aria-label="Embedding provider"
-              className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-900 outline-none focus:border-emerald-500/30 dark:border-[#2c343d] dark:bg-[#15191d] dark:text-[#f5f7fa]"
-            />
-            <input
-              value={customModel}
-              onChange={(e) => setCustomModel(e.target.value)}
-              placeholder="Model (e.g. text-embedding-3-small)"
-              aria-label="Embedding model"
-              className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-900 outline-none focus:border-emerald-500/30 dark:border-[#2c343d] dark:bg-[#15191d] dark:text-[#f5f7fa]"
-            />
+function CurrentStatusCard({
+  provider,
+  model,
+  dims,
+  totalFiles,
+  onDisable,
+  onReindex,
+  disabling,
+  reindexing,
+}: {
+  provider: string;
+  model: string;
+  dims: number | null;
+  totalFiles: number;
+  onDisable: () => void;
+  onReindex: () => void;
+  disabling: boolean;
+  reindexing: boolean;
+}) {
+  const card = PROVIDER_CARDS.find((c) => c.provider === provider && c.model === model);
+  const label = card?.label ?? provider;
+
+  return (
+    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 dark:bg-emerald-500/8">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5">
+            <span className="flex h-3 w-3 rounded-full bg-emerald-400 shrink-0" />
           </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Vector Memory Active</span>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground/80">{label}</span>
+              <span className="font-mono text-muted-foreground/70">{model}</span>
+              {dims && <span>{dims}d vectors</span>}
+              <span>{totalFiles} file{totalFiles !== 1 ? "s" : ""} indexed</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            disabled={busy || !customProvider.trim() || !customModel.trim()}
-            onClick={() => onSetup(customProvider.trim(), customModel.trim())}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-xs font-medium hover:bg-primary/90 disabled:opacity-50"
+            onClick={onReindex}
+            disabled={reindexing || disabling}
+            className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-50 dark:border-[#2c343d] dark:bg-[#20252a] dark:text-[#d6dce3] dark:hover:bg-[#232a31]"
           >
-            {busy ? <span className="inline-flex items-center gap-0.5"><span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:0ms]" /><span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:150ms]" /><span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:300ms]" /></span> : <Save className="h-3.5 w-3.5" />}
-            Save & Enable
+            {reindexing ? <><Dots />Reindexing...</> : <><RefreshCw className="h-3 w-3" />Reindex</>}
+          </button>
+          <button
+            type="button"
+            onClick={onDisable}
+            disabled={disabling || reindexing}
+            className="flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-500/10 disabled:opacity-50"
+          >
+            {disabling ? <><Dots />Disabling...</> : <><X className="h-3 w-3" />Disable</>}
           </button>
         </div>
-
-        {/* Action */}
-        {selected && (
-          <div className="text-center">
-            <button
-              type="button"
-              disabled={busy || !selected}
-              onClick={() => {
-                const opt = SETUP_OPTIONS.find((o) => o.id === selected);
-                if (opt) onSetup(opt.provider, opt.model, selected === "local" && localModelPath.trim() ? { localModelPath: localModelPath.trim() } : undefined);
-              }}
-              className="inline-flex items-center gap-2 rounded-xl bg-primary text-primary-foreground px-8 py-3 text-xs font-semibold transition hover:bg-primary/90 disabled:opacity-50"
-            >
-              {busy ? (
-                <><span className="inline-flex items-center gap-0.5"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:0ms]" /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:150ms]" /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:300ms]" /></span>Setting up...</>
-              ) : (
-                <><Zap className="h-4 w-4" />Enable Vector Memory</>
-              )}
-            </button>
-            <p className="mt-2 text-xs text-muted-foreground/40">
-              This configures your embedding provider and runs the initial index.
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );
 }
+
+/* ── Overview Stats ──────────────────────────────── */
 
 function OverviewStat({ icon: Icon, value, label, sub, color }: { icon: React.ComponentType<{ className?: string }>; value: string; label: string; sub?: string; color: string }) {
   return (
@@ -776,6 +493,8 @@ function OverviewStat({ icon: Icon, value, label, sub, color }: { icon: React.Co
     </div>
   );
 }
+
+/* ── Main Component ──────────────────────────────── */
 
 export function VectorView() {
   const [agents, setAgents] = useState<AgentMemory[]>([]);
@@ -788,10 +507,10 @@ export function VectorView() {
   const [docsLoading, setDocsLoading] = useState(false);
   const [docFilter, setDocFilter] = useState("");
   const [vectorDocs, setVectorDocs] = useState<VectorDocOption[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [savingOpenAiKey, setSavingOpenAiKey] = useState(false);
-  const [openAiKeyDraft, setOpenAiKeyDraft] = useState("");
   const [settingUp, setSettingUp] = useState(false);
+  const [settingUpId, setSettingUpId] = useState<string | null>(null);
+  const [disabling, setDisabling] = useState(false);
+  const [reindexingAll, setReindexingAll] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
   const [query, setQuery] = useState("");
   const [searchAgent, setSearchAgent] = useState("");
@@ -838,20 +557,19 @@ export function VectorView() {
       setAuthProviders(data.authProviders || []);
       setMemorySearch(data.memorySearch || null);
       await fetchDocuments();
-    }
-    catch (err) {
+    } catch (err) {
       console.error("Vector fetch:", err);
       setApiWarning(err instanceof Error ? err.message : String(err));
       setApiDegraded(true);
+    } finally {
+      setLoading(false);
     }
-    finally { setLoading(false); }
   }, [fetchDocuments]);
 
   useEffect(() => { fetchStatus(); }, [fetchStatus]);
 
   const doSearch = useCallback(async (q: string) => {
     if (!q || q.trim().length < 2) { setResults([]); setLastQuery(""); setSearchError(null); return; }
-    // Cancel any in-flight search
     searchAbortRef.current?.abort();
     const controller = new AbortController();
     searchAbortRef.current = controller;
@@ -892,12 +610,34 @@ export function VectorView() {
     }
   }, [fetchStatus]);
 
+  const handleReindexAll = useCallback(async () => {
+    setReindexingAll(true);
+    try {
+      const res = await fetch("/api/vector", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reindex" }),
+      });
+      if (!res.ok) throw new Error(`Reindex failed (${res.status})`);
+      const d = await res.json();
+      if (d.ok) {
+        setToast({ message: "Reindex complete", type: "success" });
+        await fetchStatus();
+      } else {
+        setToast({ message: typeof d.error === "string" ? d.error : "Reindex failed", type: "error" });
+      }
+    } catch (e) {
+      setToast({ message: e instanceof Error ? e.message : "Reindex failed", type: "error" });
+    } finally {
+      setReindexingAll(false);
+    }
+  }, [fetchStatus]);
+
   const handleDeleteNamespace = useCallback(async (agentId: string) => {
     const confirmed = window.confirm(
       `Delete the vector namespace for "${agentId}"?\n\nThis removes the current SQLite memory index files for that namespace. You can rebuild it later with Reindex.`
     );
     if (!confirmed) return;
-
     setDeletingNamespace(agentId);
     try {
       const res = await fetch("/api/vector", {
@@ -947,59 +687,38 @@ export function VectorView() {
     }
   }, [fetchStatus]);
 
-  const handleSaveOpenAiKey = useCallback(async (apiKey: string): Promise<boolean> => {
-    setSavingOpenAiKey(true);
+  const handleSaveProviderKey = useCallback(async (provider: string, apiKey: string): Promise<boolean> => {
     try {
       const res = await fetch("/api/models", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "auth-provider", provider: "openai", token: apiKey }),
+        body: JSON.stringify({ action: "auth-provider", provider, token: apiKey }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) {
-        throw new Error(typeof data.error === "string" ? data.error : "OpenAI key validation failed");
+        throw new Error(typeof data.error === "string" ? data.error : `${provider} key validation failed`);
       }
-      setToast({ message: "OpenAI key saved. You can now use OpenAI embeddings.", type: "success" });
+      setToast({ message: `${provider} key saved.`, type: "success" });
       await fetchStatus();
       return true;
     } catch (e) {
-      setToast({ message: e instanceof Error ? e.message : "Failed to save OpenAI key", type: "error" });
+      setToast({ message: e instanceof Error ? e.message : `Failed to save ${provider} key`, type: "error" });
       return false;
-    } finally {
-      setSavingOpenAiKey(false);
     }
   }, [fetchStatus]);
 
-  const handleUpdateModel = useCallback(async (prov: string, mod: string, options?: EmbeddingOptions) => {
-    setSaving(true);
-    try {
-      const body: Record<string, unknown> = { action: "update-embedding-model", provider: prov, model: mod };
-      if (options?.localModelPath !== undefined) body.localModelPath = options.localModelPath;
-      if (options?.fallback !== undefined) body.fallback = options.fallback;
-      if (options?.cacheEnabled !== undefined) body.cacheEnabled = options.cacheEnabled;
-      const res = await fetch("/api/vector", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      if (!res.ok) throw new Error(`Update failed (${res.status})`);
-      const d = await res.json();
-      if (!d.ok) {
-        setToast({ message: typeof d.error === "string" ? d.error : "Failed", type: "error" });
-      } else {
-        const reindexRes = await fetch("/api/vector", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "reindex", force: true }),
-        });
-        if (!reindexRes.ok) throw new Error(`Reindex failed (${reindexRes.status})`);
-        setToast({ message: "Model changed to " + prov + "/" + mod + " and reindexed.", type: "success" });
-        await fetchStatus();
-      }
-    } catch (e) { setToast({ message: e instanceof Error ? e.message : "Update failed", type: "error" }); } finally { setSaving(false); }
-  }, [fetchStatus]);
-
-  const handleSetup = useCallback(async (provider: string, model: string, options?: { localModelPath?: string }) => {
+  const handleEnable = useCallback(async (card: ProviderCard, _apiKey?: string) => {
     setSettingUp(true);
+    setSettingUpId(card.id);
     try {
-      const body: Record<string, unknown> = { action: "setup-memory", provider, model };
-      if (options?.localModelPath) body.localModelPath = options.localModelPath;
+      const body: Record<string, unknown> = {
+        action: "setup-memory",
+        provider: card.provider,
+        model: card.model,
+      };
+      if (card.provider === "local") {
+        body.localModelPath = DEFAULT_LOCAL_MODEL_PATH;
+      }
       const res = await fetch("/api/vector", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1008,7 +727,7 @@ export function VectorView() {
       if (!res.ok) throw new Error(`Setup failed (${res.status})`);
       const d = await res.json();
       if (d.ok) {
-        setToast({ message: "Vector memory enabled with " + provider + "/" + model + "!", type: "success" });
+        setToast({ message: `Vector memory enabled with ${card.label}`, type: "success" });
         setLoading(true);
         await fetchStatus();
       } else {
@@ -1018,6 +737,29 @@ export function VectorView() {
       setToast({ message: e instanceof Error ? e.message : "Setup failed", type: "error" });
     } finally {
       setSettingUp(false);
+      setSettingUpId(null);
+    }
+  }, [fetchStatus]);
+
+  const handleDisable = useCallback(async () => {
+    const confirmed = window.confirm("Disable vector memory? This turns off semantic search. Your index data is kept and can be re-enabled.");
+    if (!confirmed) return;
+    setDisabling(true);
+    try {
+      const res = await fetch("/api/vector", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "disable-memory" }),
+      });
+      if (!res.ok) throw new Error(`Disable failed (${res.status})`);
+      const d = await res.json();
+      if (!d.ok) throw new Error(typeof d.error === "string" ? d.error : "Disable failed");
+      setToast({ message: "Vector memory disabled. Re-enable anytime by choosing a provider.", type: "success" });
+      await fetchStatus();
+    } catch (e) {
+      setToast({ message: e instanceof Error ? e.message : "Disable failed", type: "error" });
+    } finally {
+      setDisabling(false);
     }
   }, [fetchStatus]);
 
@@ -1030,10 +772,15 @@ export function VectorView() {
   const vectorReadyNamespaces = agents.filter((a) => a.status.vector.available).length;
   const ftsReadyNamespaces = agents.filter((a) => a.status.fts.available).length;
   const primary = agents.find((a) => a.agentId === "main") || agents[0];
-  const curProv = primary?.status.provider || "";
-  const curModel = primary?.status.model || "";
+  const curProv = (memorySearch?.provider as string) || primary?.status.provider || "";
+  const curModel = (memorySearch?.model as string) || primary?.status.model || "";
   const curDims = primary?.status.vector.dims || null;
-  const curBackend = primary?.status.backend || "";
+  const isConfigured = Boolean(
+    memorySearch &&
+    (memorySearch as Record<string, unknown>).provider &&
+    (memorySearch as Record<string, unknown>).enabled !== false
+  );
+
   const selectedDocPaths = useMemo(
     () => vectorDocs.filter((doc) => doc.selected).map((doc) => doc.path),
     [vectorDocs],
@@ -1047,35 +794,12 @@ export function VectorView() {
     () => vectorDocs.filter((doc) => doc.source === "workspace"),
     [vectorDocs],
   );
-  const hasMemorySearchConfig = Boolean(memorySearch && Object.keys(memorySearch).length > 0);
-
-  // Determine if setup is needed:
-  // - No agents returned, OR
-  // - No memorySearch config and no active provider detected.
-  const needsSetup =
-    agents.length === 0 ||
-    (!hasMemorySearchConfig && !curProv);
 
   if (loading) {
     return (
       <SectionLayout>
         <LoadingState label="Loading vector memory..." size="lg" />
       </SectionLayout>
-    );
-  }
-
-  if (needsSetup) {
-    return (
-      <>
-        <SetupWizard
-          authProviders={authProviders}
-          onSetup={handleSetup}
-          onSaveOpenAiKey={handleSaveOpenAiKey}
-          savingOpenAiKey={savingOpenAiKey}
-          busy={settingUp}
-        />
-        {toast && <ToastBar toast={toast} onDone={() => setToast(null)} />}
-      </>
     );
   }
 
@@ -1088,15 +812,12 @@ export function VectorView() {
             Vector Memory
           </span>
         }
-        description="Browse, search, and manage your embedding index"
+        description="Semantic search across your documents and memory"
         actions={
           <div className="flex items-center gap-2">
             <ApiWarningBadge warning={apiWarning} degraded={apiDegraded} />
             <button
-              onClick={() => {
-                setLoading(true);
-                fetchStatus();
-              }}
+              onClick={() => { setLoading(true); fetchStatus(); }}
               className="rounded-lg p-2 text-muted-foreground hover:bg-foreground/10 hover:text-foreground/70"
             >
               <RefreshCw className="h-4 w-4" />
@@ -1105,242 +826,282 @@ export function VectorView() {
         }
       />
       <SectionBody width="content" padding="regular" innerClassName="space-y-6">
-        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          <OverviewStat icon={Layers} value={String(totalChunks)} label="Total Chunks" color="text-stone-700 dark:text-stone-300" />
-          <OverviewStat icon={FileText} value={String(totalFiles)} label="Indexed Files" color="text-sky-400" />
-          <OverviewStat icon={HardDrive} value={formatBytes(totalDb)} label="DB Size" color="text-emerald-400" />
-          <OverviewStat icon={Activity} value={`${agents.length - dirtyNamespaces}/${agents.length}`} label="Index Health" sub={dirtyNamespaces > 0 ? `${dirtyNamespaces} namespace${dirtyNamespaces > 1 ? "s" : ""} need reindex` : "All namespaces clean"} color={dirtyNamespaces > 0 ? "text-amber-400" : "text-emerald-400"} />
-          <OverviewStat icon={Hash} value={`${vectorReadyNamespaces}/${agents.length}`} label="Vector Ready" sub={`FTS ${ftsReadyNamespaces}/${agents.length}`} color="text-emerald-400" />
-        </div>
 
-        {/* Explicit OpenAI-for-embeddings status so you can see at a glance if it's configured */}
-        <div className="rounded-lg border border-foreground/10 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground/80">Embedding status: </span>
-          {curProv === "openai" ? (
-            <span>OpenAI is configured for embeddings ({curModel}).</span>
-          ) : authProviders.includes("openai") ? (
-            <span>Current provider is <span className="font-mono">{curProv || "—"}/{curModel || "—"}</span>. OpenAI is available — click Change below to use it for embeddings.</span>
-          ) : curProv ? (
-            <span>Current: <span className="font-mono">{curProv}/{curModel}</span></span>
-          ) : (
-            <span>No embedding provider set. Use &quot;Or configure manually&quot; below with provider <span className="font-mono">openai</span> and model <span className="font-mono">text-embedding-3-small</span> after running <code className="rounded bg-muted px-1 py-0.5 text-emerald-700 dark:text-emerald-300">openclaw onboard --auth-choice openai-api-key</code>.</span>
-          )}
-        </div>
+        {/* Section 1: Current Status (only when configured) */}
+        {isConfigured && (
+          <CurrentStatusCard
+            provider={curProv}
+            model={curModel}
+            dims={curDims}
+            totalFiles={totalFiles}
+            onDisable={handleDisable}
+            onReindex={handleReindexAll}
+            disabling={disabling}
+            reindexing={reindexingAll}
+          />
+        )}
 
-        {!authProviders.includes("openai") && (
-          <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-[#2c343d] dark:bg-[#171a1d]">
-            <div className="flex items-center gap-2 text-sm font-semibold text-foreground/90">
-              <KeyRound className="h-4 w-4 text-stone-700 dark:text-[#d6dce3]" />
-              OpenAI embeddings key
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground/70">
-              Add your OpenAI API key to enable `text-embedding-3-*` models for vector search.
-            </p>
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              <input
-                type="password"
-                placeholder="Paste OpenAI key (sk-...)"
-                aria-label="OpenAI API key input"
-                className="flex-1 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 font-mono text-xs text-stone-900 outline-none focus:border-emerald-500/30 dark:border-[#2c343d] dark:bg-[#15191d] dark:text-[#f5f7fa]"
-                value={openAiKeyDraft}
-                onChange={(e) => setOpenAiKeyDraft(e.target.value)}
-              />
-              <button
-                type="button"
-                disabled={savingOpenAiKey || !openAiKeyDraft.trim()}
-                onClick={async () => {
-                  const draft = openAiKeyDraft.trim();
-                  if (!draft) return;
-                  const ok = await handleSaveOpenAiKey(draft);
-                  if (ok) {
-                    setOpenAiKeyDraft("");
-                  }
-                }}
-                className="inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-              >
-                {savingOpenAiKey ? "Saving..." : "Save key"}
-              </button>
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground/60">
-              Get a key at{" "}
-              <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-emerald-700 underline hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200">
-                platform.openai.com
-                <ExternalLink className="h-2.5 w-2.5" />
-              </a>
-              . ChatGPT Plus does not include API credits.
+        {/* Section 2: Choose Provider */}
+        <div>
+          <div className="mb-3">
+            <h2 className="text-sm font-semibold text-foreground/90">
+              {isConfigured ? "Change Provider" : "Choose a Provider"}
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {isConfigured
+                ? "Switch to a different embedding provider. This will reindex your memory."
+                : "Pick an embedding provider to enable semantic search. One click to get started."}
             </p>
           </div>
-        )}
 
-        <EmbeddingModelEditor
-          currentProvider={curProv}
-          currentModel={curModel}
-          currentDims={curDims}
-          currentBackend={curBackend}
-          memorySearch={memorySearch}
-          onSave={handleUpdateModel}
-          saving={saving}
-        />
-
-        <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-[#2c343d] dark:bg-[#171a1d] space-y-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-foreground/90"><Search className="h-4 w-4 text-stone-700 dark:text-[#d6dce3]" />Query Console</div>
-          <div className="relative"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" /><input type="text" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") doSearch(query); }} placeholder="Semantic search across your vector memory..." aria-label="Semantic search query" className="w-full rounded-lg border border-stone-200 bg-stone-50 py-2.5 pl-10 pr-4 text-sm text-stone-900 placeholder-stone-400 outline-none focus:border-emerald-500/30 dark:border-[#2c343d] dark:bg-[#15191d] dark:text-[#f5f7fa] dark:placeholder:text-[#7a8591]" />{searching && <span className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-emerald-500 [animation-delay:0ms]" /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-emerald-500 [animation-delay:150ms]" /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-emerald-500 [animation-delay:300ms]" /></span>}</div>
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1.5"><Filter className="h-3 w-3 text-muted-foreground/60" /><span className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60">Filters</span></div>
-            <select value={searchAgent} onChange={(e) => setSearchAgent(e.target.value)} aria-label="Filter by namespace" className="rounded-md border border-foreground/10 bg-muted px-2.5 py-1.5 text-xs text-foreground/70 outline-none"><option value="">All namespaces</option>{agents.map((a) => <option key={a.agentId} value={a.agentId}>{a.agentId}</option>)}</select>
-            <div className="flex items-center gap-1.5"><span className="text-xs text-muted-foreground/60">Top-K:</span><select value={maxResults} onChange={(e) => setMaxResults(e.target.value)} aria-label="Top-K results" className="rounded-md border border-foreground/10 bg-muted px-2 py-1.5 text-xs text-foreground/70 outline-none">{["3", "5", "10", "20", "50"].map((v) => <option key={v} value={v}>{v}</option>)}</select></div>
-            <div className="flex items-center gap-1.5"><span className="text-xs text-muted-foreground/60">Min score:</span><input type="number" step="0.05" min="0" max="1" value={minScore} onChange={(e) => setMinScore(e.target.value)} placeholder="0.0" aria-label="Minimum score threshold" className="w-16 rounded-md border border-foreground/10 bg-muted px-2 py-1.5 text-xs text-foreground/70 outline-none" /></div>
-            <div className="flex items-center gap-1.5"><ArrowUpDown className="h-3 w-3 text-muted-foreground/60" /><select value={sortBy} onChange={(e) => setSortBy(e.target.value as "score" | "path")} aria-label="Sort results by" className="rounded-md border border-foreground/10 bg-muted px-2 py-1.5 text-xs text-foreground/70 outline-none"><option value="score">By score</option><option value="path">By path</option></select></div>
-          </div>
-          {lastQuery && <div className="flex items-center gap-3 text-xs text-muted-foreground"><span>{results.length} result{results.length !== 1 ? "s" : ""} for <span className="font-medium text-emerald-700 dark:text-emerald-300">{"\u201C"}{lastQuery}{"\u201D"}</span></span><span className="text-muted-foreground/40">&middot;</span><span>{searchTime}ms</span>{results.length > 0 && <><span className="text-muted-foreground/40">&middot;</span><span>top: <span className={cn("font-mono", scoreColor(results[0].score))}>{results[0].score.toFixed(4)}</span></span></>}</div>}
-        </div>
-
-        {sorted.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground"><BarChart3 className="h-3.5 w-3.5" />Results<span className="rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">{sorted.length}</span></div>
-            {sorted.map((r, i) => <ResultCard key={r.path + "-" + r.startLine + "-" + i} result={r} rank={i + 1} />)}
-          </div>
-        )}
-
-        {searchError && !searching && (
-          <div className="rounded-xl border border-dashed border-red-500/20 bg-red-500/5 p-8 text-center">
-            <AlertTriangle className="mx-auto h-8 w-8 text-red-400/60 mb-3" />
-            <p className="text-sm text-red-400">{searchError}</p>
-            <p className="text-xs text-muted-foreground/60 mt-1">Check that the gateway is running and memory is indexed.</p>
-          </div>
-        )}
-
-        {lastQuery && results.length === 0 && !searching && !searchError && (
-          <div className="rounded-xl border border-dashed border-foreground/10 bg-muted/50 p-8 text-center">
-            <Search className="mx-auto h-8 w-8 text-muted-foreground/40 mb-3" />
-            <p className="text-sm text-muted-foreground">No results for <span className="text-emerald-700 dark:text-emerald-300">{"\u201C"}{lastQuery}{"\u201D"}</span></p>
-            <p className="text-xs text-muted-foreground/60 mt-1">Try different keywords or lower the minimum score.</p>
-          </div>
-        )}
-
-        <div><h2 className="mb-3 flex items-center gap-2 text-xs font-semibold text-foreground/90"><Database className="h-4 w-4 text-stone-700 dark:text-[#d6dce3]" />Namespaces<span className="rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">{agents.length}</span></h2><div className="space-y-2">{agents.map((a) => <AgentIndexCard key={a.agentId} agent={a} onReindex={handleReindex} onDelete={handleDeleteNamespace} reindexing={reindexingAgents.has(a.agentId)} deleting={deletingNamespace === a.agentId} />)}</div></div>
-
-        <div className="rounded-xl border border-foreground/10 bg-foreground/5 p-4 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground/90">
-                <FileText className="h-4 w-4 text-stone-700 dark:text-[#d6dce3]" />
-                Document indexing
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground/70">
-                Select which documents to include in `memorySearch.extraPaths`.
+          {/* OpenAI key prompt (if not authenticated, show before the cards) */}
+          {!authProviders.includes("openai") && (
+            <div className="mb-3 rounded-xl border border-stone-200 bg-white p-3.5 shadow-sm dark:border-[#2c343d] dark:bg-[#171a1d]">
+              <p className="flex items-center gap-2 text-xs font-medium text-foreground/80">
+                <KeyRound className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-300" />
+                Add OpenAI key to unlock the best quality embeddings
               </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                disabled={workspaceDocs.length === 0}
-                onClick={() => {
-                  setVectorDocs((prev) =>
-                    prev.map((doc) =>
-                      doc.source === "workspace" ? { ...doc, selected: true } : { ...doc }
-                    )
-                  );
-                }}
-                className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-50 dark:border-[#2c343d] dark:bg-[#20252a] dark:text-[#d6dce3] dark:hover:bg-[#232a31]"
-              >
-                Vector all
-              </button>
-              <button
-                type="button"
-                disabled={selectedDocPaths.length === 0}
-                onClick={() => {
-                  setVectorDocs((prev) => prev.map((doc) => ({ ...doc, selected: false })));
-                }}
-                className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-500 hover:bg-red-500/15 disabled:opacity-50"
-              >
-                Remove all
-              </button>
-              <button
-                type="button"
-                disabled={savingDocSelection}
-                onClick={() => void handleSaveDocSelection(selectedDocPaths)}
-                className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-              >
-                {savingDocSelection ? "Saving..." : "Save selection"}
-              </button>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={docFilter}
-              onChange={(e) => setDocFilter(e.target.value)}
-              placeholder="Filter docs..."
-              aria-label="Filter indexable docs"
-              className="min-w-56 flex-1 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-900 outline-none focus:border-emerald-500/30 dark:border-[#2c343d] dark:bg-[#15191d] dark:text-[#f5f7fa]"
-            />
-            <span className="text-xs text-muted-foreground/70">
-              {selectedDocPaths.length} selected / {vectorDocs.length} total
-            </span>
-          </div>
-
-          <div className="max-h-64 overflow-auto rounded-lg border border-stone-200 bg-white dark:border-[#2c343d] dark:bg-[#171a1d]">
-            {docsLoading ? (
-              <div className="px-3 py-3 text-xs text-muted-foreground/70">Loading documents...</div>
-            ) : filteredDocs.length === 0 ? (
-              <div className="px-3 py-3 text-xs text-muted-foreground/70">No indexable documents found.</div>
-            ) : (
-              filteredDocs.map((doc) => (
-                <label
-                  key={doc.path}
-                  className="flex cursor-pointer items-center justify-between gap-3 border-b border-stone-200 px-3 py-2 last:border-b-0 hover:bg-stone-50 dark:border-[#2c343d] dark:hover:bg-[#20252a]"
+              <p className="mt-1 text-xs text-muted-foreground/70">
+                Get a key at{" "}
+                <a
+                  href="https://platform.openai.com/api-keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-emerald-700 underline hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200"
                 >
-                  <div className="min-w-0 flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={doc.selected}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setVectorDocs((prev) =>
-                          prev.map((row) =>
-                            row.path === doc.path ? { ...row, selected: checked } : row
-                          )
-                        );
-                      }}
-                      className="rounded border-foreground/20"
-                    />
-                    <span className="truncate font-mono text-xs text-foreground/80" title={doc.path}>
-                      {doc.path}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {doc.source === "custom" && (
-                      <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
-                        Custom
-                      </span>
-                    )}
-                    {doc.selected && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setVectorDocs((prev) =>
-                            prev.map((row) =>
-                              row.path === doc.path ? { ...row, selected: false } : row
-                            )
-                          );
-                        }}
-                        className="rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-[10px] font-medium text-red-500 hover:bg-red-500/15"
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                </label>
-              ))
-            )}
-          </div>
+                  platform.openai.com
+                  <ExternalLink className="h-2.5 w-2.5" />
+                </a>
+                . ChatGPT Plus does not include API credits.
+              </p>
+              <OpenAiKeyInline onSave={(key) => handleSaveProviderKey("openai", key)} />
+            </div>
+          )}
+
+          <ProviderCards
+            authProviders={authProviders}
+            activeProvider={curProv}
+            activeModel={curModel}
+            onEnable={handleEnable}
+            onSaveGoogleKey={(key) => handleSaveProviderKey("google", key)}
+            busy={settingUp}
+            busyId={settingUpId}
+          />
         </div>
 
+        {/* Stats overview (only when configured and have data) */}
+        {isConfigured && agents.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            <OverviewStat icon={Layers} value={String(totalChunks)} label="Total Chunks" color="text-stone-700 dark:text-stone-300" />
+            <OverviewStat icon={FileText} value={String(totalFiles)} label="Indexed Files" color="text-sky-400" />
+            <OverviewStat icon={HardDrive} value={formatBytes(totalDb)} label="DB Size" color="text-emerald-400" />
+            <OverviewStat icon={Activity} value={`${agents.length - dirtyNamespaces}/${agents.length}`} label="Index Health" sub={dirtyNamespaces > 0 ? `${dirtyNamespaces} namespace${dirtyNamespaces > 1 ? "s" : ""} need reindex` : "All namespaces clean"} color={dirtyNamespaces > 0 ? "text-amber-400" : "text-emerald-400"} />
+            <OverviewStat icon={Hash} value={`${vectorReadyNamespaces}/${agents.length}`} label="Vector Ready" sub={`FTS ${ftsReadyNamespaces}/${agents.length}`} color="text-emerald-400" />
+          </div>
+        )}
+
+        {/* Search console (only when configured) */}
+        {isConfigured && (
+          <>
+            <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-[#2c343d] dark:bg-[#171a1d] space-y-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground/90"><Search className="h-4 w-4 text-stone-700 dark:text-[#d6dce3]" />Query Console</div>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" />
+                <input type="text" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") doSearch(query); }} placeholder="Semantic search across your vector memory..." aria-label="Semantic search query" className="w-full rounded-lg border border-stone-200 bg-stone-50 py-2.5 pl-10 pr-4 text-sm text-stone-900 placeholder-stone-400 outline-none focus:border-emerald-500/30 dark:border-[#2c343d] dark:bg-[#15191d] dark:text-[#f5f7fa] dark:placeholder:text-[#7a8591]" />
+                {searching && <span className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-emerald-500 [animation-delay:0ms]" /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-emerald-500 [animation-delay:150ms]" /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-emerald-500 [animation-delay:300ms]" /></span>}
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-1.5"><Filter className="h-3 w-3 text-muted-foreground/60" /><span className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60">Filters</span></div>
+                <select value={searchAgent} onChange={(e) => setSearchAgent(e.target.value)} aria-label="Filter by namespace" className="rounded-md border border-foreground/10 bg-muted px-2.5 py-1.5 text-xs text-foreground/70 outline-none"><option value="">All namespaces</option>{agents.map((a) => <option key={a.agentId} value={a.agentId}>{a.agentId}</option>)}</select>
+                <div className="flex items-center gap-1.5"><span className="text-xs text-muted-foreground/60">Top-K:</span><select value={maxResults} onChange={(e) => setMaxResults(e.target.value)} aria-label="Top-K results" className="rounded-md border border-foreground/10 bg-muted px-2 py-1.5 text-xs text-foreground/70 outline-none">{["3", "5", "10", "20", "50"].map((v) => <option key={v} value={v}>{v}</option>)}</select></div>
+                <div className="flex items-center gap-1.5"><span className="text-xs text-muted-foreground/60">Min score:</span><input type="number" step="0.05" min="0" max="1" value={minScore} onChange={(e) => setMinScore(e.target.value)} placeholder="0.0" aria-label="Minimum score threshold" className="w-16 rounded-md border border-foreground/10 bg-muted px-2 py-1.5 text-xs text-foreground/70 outline-none" /></div>
+                <div className="flex items-center gap-1.5"><ArrowUpDown className="h-3 w-3 text-muted-foreground/60" /><select value={sortBy} onChange={(e) => setSortBy(e.target.value as "score" | "path")} aria-label="Sort results by" className="rounded-md border border-foreground/10 bg-muted px-2 py-1.5 text-xs text-foreground/70 outline-none"><option value="score">By score</option><option value="path">By path</option></select></div>
+              </div>
+              {lastQuery && <div className="flex items-center gap-3 text-xs text-muted-foreground"><span>{results.length} result{results.length !== 1 ? "s" : ""} for <span className="font-medium text-emerald-700 dark:text-emerald-300">{"\u201C"}{lastQuery}{"\u201D"}</span></span><span className="text-muted-foreground/40">&middot;</span><span>{searchTime}ms</span>{results.length > 0 && <><span className="text-muted-foreground/40">&middot;</span><span>top: <span className={cn("font-mono", scoreColor(results[0].score))}>{results[0].score.toFixed(4)}</span></span></>}</div>}
+            </div>
+
+            {sorted.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground"><BarChart3 className="h-3.5 w-3.5" />Results<span className="rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">{sorted.length}</span></div>
+                {sorted.map((r, i) => <ResultCard key={r.path + "-" + r.startLine + "-" + i} result={r} rank={i + 1} />)}
+              </div>
+            )}
+
+            {searchError && !searching && (
+              <div className="rounded-xl border border-dashed border-red-500/20 bg-red-500/5 p-8 text-center">
+                <AlertTriangle className="mx-auto h-8 w-8 text-red-400/60 mb-3" />
+                <p className="text-sm text-red-400">{searchError}</p>
+                <p className="text-xs text-muted-foreground/60 mt-1">Check that the gateway is running and memory is indexed.</p>
+              </div>
+            )}
+
+            {lastQuery && results.length === 0 && !searching && !searchError && (
+              <div className="rounded-xl border border-dashed border-foreground/10 bg-muted/50 p-8 text-center">
+                <Search className="mx-auto h-8 w-8 text-muted-foreground/40 mb-3" />
+                <p className="text-sm text-muted-foreground">No results for <span className="text-emerald-700 dark:text-emerald-300">{"\u201C"}{lastQuery}{"\u201D"}</span></p>
+                <p className="text-xs text-muted-foreground/60 mt-1">Try different keywords or lower the minimum score.</p>
+              </div>
+            )}
+
+            <div>
+              <h2 className="mb-3 flex items-center gap-2 text-xs font-semibold text-foreground/90"><Database className="h-4 w-4 text-stone-700 dark:text-[#d6dce3]" />Namespaces<span className="rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">{agents.length}</span></h2>
+              <div className="space-y-2">{agents.map((a) => <AgentIndexCard key={a.agentId} agent={a} onReindex={handleReindex} onDelete={handleDeleteNamespace} reindexing={reindexingAgents.has(a.agentId)} deleting={deletingNamespace === a.agentId} />)}</div>
+            </div>
+
+            <div className="rounded-xl border border-foreground/10 bg-foreground/5 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground/90">
+                    <FileText className="h-4 w-4 text-stone-700 dark:text-[#d6dce3]" />
+                    Document indexing
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground/70">
+                    Select which documents to include in the vector index.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={workspaceDocs.length === 0}
+                    onClick={() => {
+                      setVectorDocs((prev) =>
+                        prev.map((doc) =>
+                          doc.source === "workspace" ? { ...doc, selected: true } : { ...doc }
+                        )
+                      );
+                    }}
+                    className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-50 dark:border-[#2c343d] dark:bg-[#20252a] dark:text-[#d6dce3] dark:hover:bg-[#232a31]"
+                  >
+                    Select all
+                  </button>
+                  <button
+                    type="button"
+                    disabled={selectedDocPaths.length === 0}
+                    onClick={() => {
+                      setVectorDocs((prev) => prev.map((doc) => ({ ...doc, selected: false })));
+                    }}
+                    className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-500 hover:bg-red-500/15 disabled:opacity-50"
+                  >
+                    Clear all
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingDocSelection}
+                    onClick={() => void handleSaveDocSelection(selectedDocPaths)}
+                    className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {savingDocSelection ? "Saving..." : "Save selection"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  value={docFilter}
+                  onChange={(e) => setDocFilter(e.target.value)}
+                  placeholder="Filter docs..."
+                  aria-label="Filter indexable docs"
+                  className="min-w-56 flex-1 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-900 outline-none focus:border-emerald-500/30 dark:border-[#2c343d] dark:bg-[#15191d] dark:text-[#f5f7fa]"
+                />
+                <span className="text-xs text-muted-foreground/70">
+                  {selectedDocPaths.length} selected / {vectorDocs.length} total
+                </span>
+              </div>
+
+              <div className="max-h-64 overflow-auto rounded-lg border border-stone-200 bg-white dark:border-[#2c343d] dark:bg-[#171a1d]">
+                {docsLoading ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground/70">Loading documents...</div>
+                ) : filteredDocs.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground/70">No indexable documents found.</div>
+                ) : (
+                  filteredDocs.map((doc) => (
+                    <label
+                      key={doc.path}
+                      className="flex cursor-pointer items-center justify-between gap-3 border-b border-stone-200 px-3 py-2 last:border-b-0 hover:bg-stone-50 dark:border-[#2c343d] dark:hover:bg-[#20252a]"
+                    >
+                      <div className="min-w-0 flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={doc.selected}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setVectorDocs((prev) =>
+                              prev.map((row) =>
+                                row.path === doc.path ? { ...row, selected: checked } : row
+                              )
+                            );
+                          }}
+                          className="rounded border-foreground/20"
+                        />
+                        <span className="truncate font-mono text-xs text-foreground/80" title={doc.path}>
+                          {doc.path}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {doc.source === "custom" && (
+                          <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+                            Custom
+                          </span>
+                        )}
+                        {doc.selected && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setVectorDocs((prev) =>
+                                prev.map((row) =>
+                                  row.path === doc.path ? { ...row, selected: false } : row
+                                )
+                              );
+                            }}
+                            className="rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-[10px] font-medium text-red-500 hover:bg-red-500/15"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
+          </>
+        )}
 
       </SectionBody>
       {toast && <ToastBar toast={toast} onDone={() => setToast(null)} />}
-    </SectionLayout >
+    </SectionLayout>
+  );
+}
+
+/* ── OpenAI key inline widget ────────────────────── */
+
+function OpenAiKeyInline({ onSave }: { onSave: (key: string) => Promise<boolean> }) {
+  const [key, setKey] = useState("");
+  const [saving, setSaving] = useState(false);
+  return (
+    <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+      <input
+        type="password"
+        value={key}
+        onChange={(e) => setKey(e.target.value)}
+        placeholder="sk-..."
+        aria-label="OpenAI API key"
+        className="flex-1 rounded-lg border border-stone-200 bg-stone-50 px-3 py-1.5 font-mono text-xs text-stone-900 outline-none focus:border-emerald-500/30 dark:border-[#2c343d] dark:bg-[#15191d] dark:text-[#f5f7fa]"
+      />
+      <button
+        type="button"
+        disabled={saving || !key.trim()}
+        onClick={async () => {
+          setSaving(true);
+          const ok = await onSave(key.trim());
+          setSaving(false);
+          if (ok) setKey("");
+        }}
+        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 whitespace-nowrap"
+      >
+        {saving ? "Saving..." : "Save key"}
+      </button>
+    </div>
   );
 }

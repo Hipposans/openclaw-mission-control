@@ -1,4 +1,7 @@
-import { getGatewayToken, getGatewayUrl } from "./paths";
+import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { getGatewayToken, getGatewayUrl, getOpenClawHome } from "./paths";
 
 type GatewayConnectHello = {
   features?: {
@@ -15,6 +18,7 @@ type GatewayErrorPayload = {
 type GatewayEventMessage = {
   type: "event";
   event?: string;
+  payload?: Record<string, unknown>;
 };
 
 type GatewayResponseMessage = {
@@ -31,6 +35,19 @@ type PendingRequest = {
   timer: ReturnType<typeof setTimeout>;
 };
 
+type DeviceIdentity = {
+  deviceId: string;
+  publicKeyPem: string;
+  privateKeyPem: string;
+};
+
+type DeviceAuthTokens = {
+  operator?: {
+    token: string;
+    scopes: string[];
+  };
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -40,6 +57,106 @@ function toWsUrl(url: string): string {
   parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
   return parsed.toString();
 }
+
+// ── Device auth helpers (mirrors openclaw CLI logic) ──────────
+
+const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
+
+function base64UrlEncode(buf: Buffer): string {
+  return buf.toString("base64").replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, "");
+}
+
+function derivePublicKeyRaw(publicKeyPem: string): Buffer {
+  const spki = crypto.createPublicKey(publicKeyPem).export({ type: "spki", format: "der" });
+  if (
+    spki.length === ED25519_SPKI_PREFIX.length + 32 &&
+    spki.subarray(0, ED25519_SPKI_PREFIX.length).equals(ED25519_SPKI_PREFIX)
+  ) {
+    return spki.subarray(ED25519_SPKI_PREFIX.length);
+  }
+  return spki;
+}
+
+function buildDeviceAuthPayloadV3(params: {
+  deviceId: string;
+  clientId: string;
+  clientMode: string;
+  role: string;
+  scopes: string[];
+  signedAtMs: number;
+  token: string | null;
+  nonce: string;
+  platform: string;
+  deviceFamily?: string;
+}): string {
+  const scopes = params.scopes.join(",");
+  const token = params.token ?? "";
+  const platform = (params.platform || "").toLowerCase().trim();
+  const deviceFamily = (params.deviceFamily || "").toLowerCase().trim();
+  return [
+    "v3",
+    params.deviceId,
+    params.clientId,
+    params.clientMode,
+    params.role,
+    scopes,
+    String(params.signedAtMs),
+    token,
+    params.nonce,
+    platform,
+    deviceFamily,
+  ].join("|");
+}
+
+function signDevicePayload(privateKeyPem: string, payload: string): string {
+  const key = crypto.createPrivateKey(privateKeyPem);
+  return base64UrlEncode(crypto.sign(null, Buffer.from(payload, "utf8"), key) as unknown as Buffer);
+}
+
+// ── Device identity loading ──────────
+
+let _deviceIdentityLoaded = false;
+let _deviceIdentity: DeviceIdentity | null = null;
+let _deviceAuthTokensLoaded = false;
+let _deviceAuthTokens: DeviceAuthTokens | null = null;
+
+function loadDeviceIdentity(): DeviceIdentity | null {
+  if (_deviceIdentityLoaded) return _deviceIdentity;
+  _deviceIdentityLoaded = true;
+  try {
+    const path = join(getOpenClawHome(), "identity", "device.json");
+    const data = JSON.parse(readFileSync(path, "utf-8"));
+    if (data.deviceId && data.publicKeyPem && data.privateKeyPem) {
+      _deviceIdentity = {
+        deviceId: data.deviceId,
+        publicKeyPem: data.publicKeyPem,
+        privateKeyPem: data.privateKeyPem,
+      };
+      return _deviceIdentity;
+    }
+  } catch {
+    // No device identity available
+  }
+  _deviceIdentity = null;
+  return null;
+}
+
+function loadDeviceAuthTokens(): DeviceAuthTokens | null {
+  if (_deviceAuthTokensLoaded) return _deviceAuthTokens;
+  _deviceAuthTokensLoaded = true;
+  try {
+    const path = join(getOpenClawHome(), "identity", "device-auth.json");
+    const data = JSON.parse(readFileSync(path, "utf-8"));
+    _deviceAuthTokens = data.tokens || null;
+    return _deviceAuthTokens;
+  } catch {
+    // No device auth tokens available
+  }
+  _deviceAuthTokens = null;
+  return null;
+}
+
+// ──────────────────────────────────────────────────
 
 export class GatewayRpcError extends Error {
   code?: string;
@@ -62,11 +179,18 @@ export class GatewayRpcClient {
   private connectRequestSent = false;
   private connectTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private connectKickTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectNonce: string | null = null;
   private supportedMethods = new Set<string>();
   private pending = new Map<string, PendingRequest>();
   private seq = 0;
   private readonly token: string;
   private readonly gatewayUrl?: string;
+  private listeners: {
+    open?: () => void;
+    message?: (event: MessageEvent) => void;
+    close?: (event: CloseEvent) => void;
+    error?: () => void;
+  } = {};
 
   constructor(gatewayUrl?: string, token?: string) {
     this.gatewayUrl = gatewayUrl;
@@ -140,6 +264,7 @@ export class GatewayRpcClient {
       this.connectReject = onReject;
       this.connectRequestId = this.nextId();
       this.connectRequestSent = false;
+      this.connectNonce = null;
 
       const timer = setTimeout(() => {
         onReject(new GatewayRpcError("Gateway RPC connect timed out"));
@@ -151,23 +276,30 @@ export class GatewayRpcClient {
         const ws = new WebSocket(wsUrl);
         this.ws = ws;
 
-        ws.addEventListener("open", () => {
+        this.listeners.open = () => {
+          // Wait for connect.challenge before sending connect request.
+          // Fall back to sending after 750ms if no challenge arrives (older gateways).
           this.scheduleConnectRequest();
-        });
-        ws.addEventListener("message", (event) => {
+        };
+        this.listeners.message = (event: MessageEvent) => {
           this.handleMessage(String(event.data ?? ""));
-        });
-        ws.addEventListener("close", (event) => {
+        };
+        this.listeners.close = (event: CloseEvent) => {
           const reason = String(event.reason || "socket closed");
           this.handleSocketClosed(
             new GatewayRpcError(`Gateway RPC socket closed (${event.code}): ${reason}`),
           );
-        });
-        ws.addEventListener("error", () => {
+        };
+        this.listeners.error = () => {
           if (this.ws?.readyState !== WebSocket.OPEN && this.connectReject) {
             this.connectReject(new GatewayRpcError("Gateway RPC socket error"));
           }
-        });
+        };
+
+        ws.addEventListener("open", this.listeners.open);
+        ws.addEventListener("message", this.listeners.message);
+        ws.addEventListener("close", this.listeners.close);
+        ws.addEventListener("error", this.listeners.error);
       } catch (err) {
         clearTimeout(timer);
         onReject(this.normalizeError(err));
@@ -187,6 +319,12 @@ export class GatewayRpcClient {
 
     if (message.type === "event") {
       if (message.event === "connect.challenge") {
+        const payload = (message as GatewayEventMessage).payload;
+        const nonce =
+          payload && typeof payload.nonce === "string" ? payload.nonce.trim() : null;
+        if (nonce) {
+          this.connectNonce = nonce;
+        }
         this.sendConnectRequest();
       }
       return;
@@ -249,6 +387,55 @@ export class GatewayRpcClient {
       this.connectKickTimer = null;
     }
 
+    const scopes = [
+      "operator.read",
+      "operator.write",
+      "operator.admin",
+      "operator.approvals",
+      "operator.pairing",
+    ];
+    const nonce = this.connectNonce || "";
+
+    // Resolve device identity and auth tokens for signed connect.
+    const identity = loadDeviceIdentity();
+    const authTokens = loadDeviceAuthTokens();
+    const deviceToken = authTokens?.operator?.token;
+
+    // Build auth: prefer device token over gateway token.
+    const authToken = this.token || undefined;
+    const auth: Record<string, unknown> = {};
+    if (authToken) auth.token = authToken;
+    if (deviceToken) auth.deviceToken = deviceToken;
+
+    // Build device signature if identity is available and we have a nonce.
+    let device: Record<string, unknown> | undefined;
+    if (identity && nonce) {
+      const signedAtMs = Date.now();
+      // Token used for signature: must match what auth.token sends.
+      // The gateway verifies the signature against the token in the connect
+      // request. When a gateway token is present it takes precedence.
+      const signatureToken = authToken || deviceToken || null;
+      const payload = buildDeviceAuthPayloadV3({
+        deviceId: identity.deviceId,
+        clientId: "cli",
+        clientMode: "backend",
+        role: "operator",
+        scopes,
+        signedAtMs,
+        token: signatureToken,
+        nonce,
+        platform: process.platform,
+      });
+      const signature = signDevicePayload(identity.privateKeyPem, payload);
+      device = {
+        id: identity.deviceId,
+        publicKey: base64UrlEncode(derivePublicKeyRaw(identity.publicKeyPem)),
+        signature,
+        signedAt: signedAtMs,
+        nonce,
+      };
+    }
+
     ws.send(
       JSON.stringify({
         type: "req",
@@ -265,9 +452,10 @@ export class GatewayRpcClient {
             instanceId: `pid-${process.pid}`,
           },
           role: "operator",
-          scopes: ["operator.read", "operator.admin", "operator.approvals", "operator.pairing"],
+          scopes,
           caps: [],
-          ...(this.token ? { auth: { token: this.token } } : {}),
+          ...(Object.keys(auth).length > 0 ? { auth } : {}),
+          ...(device ? { device } : {}),
           locale: "en-US",
           userAgent: "@openclaw/dashboard",
         },
@@ -301,10 +489,15 @@ export class GatewayRpcClient {
     this.connectReject = null;
     this.connectRequestId = null;
     this.connectRequestSent = false;
+    this.connectNonce = null;
   }
 
   private closeSocket(): void {
     if (this.ws) {
+      if (this.listeners.open) this.ws.removeEventListener("open", this.listeners.open);
+      if (this.listeners.message) this.ws.removeEventListener("message", this.listeners.message as EventListener);
+      if (this.listeners.close) this.ws.removeEventListener("close", this.listeners.close as EventListener);
+      if (this.listeners.error) this.ws.removeEventListener("error", this.listeners.error);
       try {
         this.ws.close();
       } catch {
@@ -312,6 +505,7 @@ export class GatewayRpcClient {
       }
     }
     this.ws = null;
+    this.listeners = {};
   }
 
   private nextId(): string {

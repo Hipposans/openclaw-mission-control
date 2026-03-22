@@ -19,33 +19,7 @@ export type ProviderModelItem = { id: string; name: string };
 export const PROVIDER_ENV_KEYS: Record<string, string> = {
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
-  google: "GEMINI_API_KEY",
-  groq: "GROQ_API_KEY",
-  xai: "XAI_API_KEY",
-  mistral: "MISTRAL_API_KEY",
   openrouter: "OPENROUTER_API_KEY",
-  cerebras: "CEREBRAS_API_KEY",
-  huggingface: "HUGGINGFACE_HUB_TOKEN",
-  zai: "ZAI_API_KEY",
-  minimax: "MINIMAX_API_KEY",
-};
-
-export const MINIMAX_PROVIDER_MODELS: ProviderModelItem[] = [
-  { id: "minimax/MiniMax-M2.5", name: "MiniMax M2.5" },
-  { id: "minimax/MiniMax-M2.5-highspeed", name: "MiniMax M2.5 High-Speed" },
-  { id: "minimax/MiniMax-M2.1", name: "MiniMax M2.1" },
-  { id: "minimax/MiniMax-M2.1-highspeed", name: "MiniMax M2.1 High-Speed" },
-  { id: "minimax/MiniMax-M2", name: "MiniMax M2" },
-];
-
-export const MINIMAX_PROVIDER_CONFIG = {
-  baseUrl: "https://api.minimax.io/anthropic",
-  api: "anthropic-messages",
-  apiKey: "${MINIMAX_API_KEY}",
-  models: MINIMAX_PROVIDER_MODELS.map((model) => ({
-    id: model.id.replace(/^minimax\//, ""),
-    name: model.name,
-  })),
 };
 
 const PROVIDER_PROBES: Record<string, ProviderProbe> = {
@@ -71,62 +45,10 @@ const PROVIDER_PROBES: Record<string, ProviderProbe> = {
     authErrorStatuses: [401, 403],
     treatClientErrorAsReachable: true,
   },
-  google: {
-    url: "https://generativelanguage.googleapis.com/v1beta/models",
-    method: "GET",
-    buildHeaders: () => ({}),
-  },
   openrouter: {
     url: "https://openrouter.ai/api/v1/models",
     method: "GET",
     buildHeaders: (token) => ({ Authorization: `Bearer ${token}` }),
-  },
-  groq: {
-    url: "https://api.groq.com/openai/v1/models",
-    method: "GET",
-    buildHeaders: (token) => ({ Authorization: `Bearer ${token}` }),
-  },
-  xai: {
-    url: "https://api.x.ai/v1/models",
-    method: "GET",
-    buildHeaders: (token) => ({ Authorization: `Bearer ${token}` }),
-  },
-  mistral: {
-    url: "https://api.mistral.ai/v1/models",
-    method: "GET",
-    buildHeaders: (token) => ({ Authorization: `Bearer ${token}` }),
-  },
-  cerebras: {
-    url: "https://api.cerebras.ai/v1/models",
-    method: "GET",
-    buildHeaders: (token) => ({ Authorization: `Bearer ${token}` }),
-  },
-  huggingface: {
-    url: "https://router.huggingface.co/v1/models",
-    method: "GET",
-    buildHeaders: (token) => ({ Authorization: `Bearer ${token}` }),
-  },
-  zai: {
-    url: "https://api.z.ai/api/paas/v4/models",
-    method: "GET",
-    buildHeaders: (token) => ({ Authorization: `Bearer ${token}` }),
-  },
-  minimax: {
-    url: "https://api.minimax.io/anthropic/v1/messages",
-    method: "POST",
-    buildHeaders: (token) => ({
-      Authorization: `Bearer ${token}`,
-      "anthropic-version": "2023-06-01",
-      "Content-Type": "application/json",
-    }),
-    buildBody: () =>
-      JSON.stringify({
-        model: "MiniMax-M2.1",
-        max_tokens: 1,
-        messages: [{ role: "user", content: "hi" }],
-      }),
-    authErrorStatuses: [401, 403],
-    treatClientErrorAsReachable: true,
   },
 };
 
@@ -142,44 +64,9 @@ const MODEL_LIST_CONFIG: Record<string, ModelListConfig> = {
       "anthropic-version": "2023-06-01",
     }),
   },
-  google: {
-    url: "https://generativelanguage.googleapis.com/v1beta/models",
-    buildHeaders: () => ({}),
-    buildUrl: (token) =>
-      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(token)}`,
-  },
   openrouter: {
     url: "https://openrouter.ai/api/v1/models",
     buildHeaders: (token) => ({ Authorization: `Bearer ${token}` }),
-  },
-  groq: {
-    url: "https://api.groq.com/openai/v1/models",
-    buildHeaders: (token) => ({ Authorization: `Bearer ${token}` }),
-  },
-  xai: {
-    url: "https://api.x.ai/v1/models",
-    buildHeaders: (token) => ({ Authorization: `Bearer ${token}` }),
-  },
-  mistral: {
-    url: "https://api.mistral.ai/v1/models",
-    buildHeaders: (token) => ({ Authorization: `Bearer ${token}` }),
-  },
-  cerebras: {
-    url: "https://api.cerebras.ai/v1/models",
-    buildHeaders: (token) => ({ Authorization: `Bearer ${token}` }),
-  },
-  huggingface: {
-    url: "https://router.huggingface.co/v1/models",
-    buildHeaders: (token) => ({ Authorization: `Bearer ${token}` }),
-  },
-  zai: {
-    url: "https://api.z.ai/api/paas/v4/models",
-    buildHeaders: (token) => ({ Authorization: `Bearer ${token}` }),
-  },
-  minimax: {
-    url: "https://api.minimax.io/v1/models",
-    buildHeaders: (token) => ({ Authorization: `Bearer ${token}` }),
-    fallbackModels: MINIMAX_PROVIDER_MODELS,
   },
 };
 
@@ -279,10 +166,7 @@ export async function validateProviderToken(
     return { ok: false, error: `Unknown provider: ${providerId}` };
   }
 
-  const url =
-    providerId === "google"
-      ? `${probe.url}?key=${encodeURIComponent(apiKey)}`
-      : probe.url;
+  const url = probe.url;
 
   try {
     const res = await fetch(url, {
@@ -365,27 +249,6 @@ export async function fetchModelsFromProvider(
         })
         .filter((row): row is ProviderModelItem => row !== null));
     }
-    case "google": {
-      const rows =
-        data && typeof data === "object" && Array.isArray((data as { models?: unknown[] }).models)
-          ? (data as { models: Array<{ name?: string; displayName?: string; supportedGenerationMethods?: string[] }> }).models
-          : [];
-      return filterProviderModels(providerId, rows
-        .filter((row) => row.supportedGenerationMethods?.includes("generateContent"))
-        .map((row) => {
-          const modelName = String(row.name || "").replace(/^models\//, "");
-          return {
-            id: `google/${modelName}`,
-            name: String(row.displayName || modelName),
-          };
-        })
-        .filter((row) => row.id !== "google/"));
-    }
-    case "minimax": {
-      const parsed = parseStandardDataModels(providerId, data);
-      const models = parsed.length > 0 ? parsed : config.fallbackModels || [];
-      return filterProviderModels(providerId, models);
-    }
     default:
       return filterProviderModels(providerId, parseStandardDataModels(providerId, data));
   }
@@ -410,15 +273,6 @@ export function buildProviderCredentialPatch(
       },
     },
   };
-
-  if (providerId === "minimax") {
-    patch.models = {
-      mode: "merge",
-      providers: {
-        minimax: MINIMAX_PROVIDER_CONFIG,
-      },
-    };
-  }
 
   return patch;
 }
