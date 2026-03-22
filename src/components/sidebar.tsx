@@ -41,6 +41,7 @@ import {
   HelpCircle,
   Puzzle,
   Radio,
+  Building2,
 } from "lucide-react";
 import { getChatUnreadCount, subscribeChatStore } from "@/lib/chat-store";
 
@@ -63,6 +64,7 @@ const defaultNavItems: NavItem[] = [
   { group: "Overview", section: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { section: "activity", label: "Activity", icon: Activity, href: "/activity" },
   { section: "usage", label: "Usage", icon: BarChart3, href: "/usage" },
+  { section: "office", label: "Office", icon: Building2, href: "/office" },
   // ── Agents ──
   { group: "Agents", section: "agents", label: "Agents", icon: Users, href: "/agents" },
   { section: "agents", label: "Subagents", icon: Users2, href: "/agents?tab=subagents", tab: "subagents", isSubItem: true },
@@ -110,6 +112,7 @@ const hostedNavItems: NavItem[] = [
   { group: "Overview", section: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { section: "activity", label: "Activity", icon: Activity, href: "/activity" },
   { section: "usage", label: "Usage", icon: BarChart3, href: "/usage" },
+  { section: "office", label: "Office", icon: Building2, href: "/office" },
   // ── Agents ──
   { group: "Agents", section: "agents", label: "Agents", icon: Users, href: "/agents" },
   { section: "agents", label: "Models", icon: Cpu, href: "/agents?tab=models", tab: "models", isSubItem: true },
@@ -192,6 +195,7 @@ function deriveSectionFromPath(pathname: string): string | null {
     "settings",
     "activity",
     "help",
+    "office",
   ]);
   return known.has(first) ? first : null;
 }

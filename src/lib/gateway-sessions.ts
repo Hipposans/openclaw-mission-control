@@ -51,9 +51,12 @@ export type NormalizedGatewaySession = {
 
 export type AgentSessionSummary = {
   sessionCount: number;
+  runningSessions: number;
   totalTokens: number;
   lastActive: number;
 };
+
+const RUNNING_SESSION_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
 
 function toEpochMs(value: unknown): number {
   const num = typeof value === "number" ? value : Number(value);
@@ -149,10 +152,12 @@ export function summarizeSessionsByAgent(
     if (!session.agentId) continue;
     const prev = out.get(session.agentId) || {
       sessionCount: 0,
+      runningSessions: 0,
       totalTokens: 0,
       lastActive: 0,
     };
     prev.sessionCount += 1;
+    if (session.ageMs <= RUNNING_SESSION_WINDOW_MS) prev.runningSessions += 1;
     prev.totalTokens += session.totalTokens;
     if (session.updatedAt > prev.lastActive) prev.lastActive = session.updatedAt;
     out.set(session.agentId, prev);

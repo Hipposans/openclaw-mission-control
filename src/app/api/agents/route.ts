@@ -26,6 +26,7 @@ type AgentFull = {
   agentDir: string;
   isDefault: boolean;
   sessionCount: number;
+  runningSessions: number;
   lastActive: number | null;
   totalTokens: number;
   bindings: string[];
@@ -446,7 +447,7 @@ export async function GET() {
 
     // Session state comes from gateway RPC (source of truth), not local files.
     let gatewaySessions = [] as Awaited<ReturnType<typeof fetchGatewaySessions>>;
-    let sessionsByAgent = new Map<string, { sessionCount: number; totalTokens: number; lastActive: number }>();
+    let sessionsByAgent = new Map<string, { sessionCount: number; runningSessions: number; totalTokens: number; lastActive: number }>();
     const runtimeSubagentsByAgent = new Map<
       string,
       AgentFull["runtimeSubagents"]
@@ -572,6 +573,7 @@ export async function GET() {
       // Sessions & tokens from gateway truth.
       const sessionSummary = sessionsByAgent.get(id);
       const sessionCount = sessionSummary?.sessionCount || 0;
+      const runningSessions = sessionSummary?.runningSessions || 0;
       const lastActive = sessionSummary && sessionSummary.lastActive > 0
         ? sessionSummary.lastActive
         : null;
@@ -613,6 +615,7 @@ export async function GET() {
         agentDir,
         isDefault: Boolean(cfg.default === true || id === discoveredDefaultAgentId),
         sessionCount,
+        runningSessions,
         lastActive,
         totalTokens,
         bindings,

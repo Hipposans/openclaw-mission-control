@@ -258,7 +258,7 @@ export class GatewayRpcClient {
           minProtocol: 3,
           maxProtocol: 3,
           client: {
-            id: "cli",
+            id: "openclaw-control-ui",
             version: "mission-control",
             platform: process.platform,
             mode: "backend",

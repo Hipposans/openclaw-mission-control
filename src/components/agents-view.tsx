@@ -141,6 +141,7 @@ type Agent = {
   agentDir: string;
   isDefault: boolean;
   sessionCount: number;
+  runningSessions: number;
   lastActive: number | null;
   totalTokens: number;
   bindings: string[];
@@ -323,6 +324,19 @@ function AgentNodeComponent({ data }: NodeProps) {
           </span>
         ))}
       </div>
+
+      {/* Running sessions badge */}
+      {agent.runningSessions > 0 && (
+        <div className="mt-2 flex items-center gap-1.5">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-50" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+          </span>
+          <span className="text-xs font-semibold text-emerald-400">
+            {agent.runningSessions} running
+          </span>
+        </div>
+      )}
 
       {/* Stats row */}
       <div className="mt-2 flex items-center gap-3 border-t border-foreground/5 pt-2 text-xs">
@@ -1362,6 +1376,7 @@ function CopyBtn({ text }: { text: string }) {
 
 function SummaryBar({ agents }: { agents: Agent[] }) {
   const totalSessions = agents.reduce((s, a) => s + a.sessionCount, 0);
+  const totalRunning = agents.reduce((s, a) => s + a.runningSessions, 0);
   const activeCount = agents.filter((a) => a.status === "active").length;
   const channelSet = new Set(agents.flatMap((a) => a.channels));
 
@@ -1370,7 +1385,7 @@ function SummaryBar({ agents }: { agents: Agent[] }) {
       {[
         { icon: <Users className="h-4 w-4 text-[var(--accent-brand-text)]" />, label: "Agents", value: String(agents.length) },
         { icon: <Zap className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />, label: "Active", value: `${activeCount} / ${agents.length}` },
-        { icon: <MessageSquare className="h-4 w-4 text-sky-600 dark:text-sky-300" />, label: "Sessions", value: String(totalSessions) },
+        { icon: <MessageSquare className="h-4 w-4 text-sky-600 dark:text-sky-300" />, label: "Sessions", value: totalRunning > 0 ? `${totalRunning} running / ${totalSessions}` : String(totalSessions) },
         { icon: <Hash className="h-4 w-4 text-amber-600 dark:text-amber-300" />, label: "Channels", value: String(channelSet.size) },
       ].map((s) => (
         <div key={s.label} className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 shadow-sm dark:border-stone-700 dark:bg-stone-800">
@@ -1447,6 +1462,17 @@ function GridView({
                     {channelIcon(ch)} {ch}
                   </span>
                 ))}
+              </div>
+            )}
+            {agent.runningSessions > 0 && (
+              <div className="mt-2 flex items-center gap-1.5">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-50" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+                </span>
+                <span className="text-xs font-semibold text-emerald-400">
+                  {agent.runningSessions} running
+                </span>
               </div>
             )}
             <div className="mt-2 grid grid-cols-3 gap-1.5 text-center">
