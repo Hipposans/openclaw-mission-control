@@ -328,26 +328,19 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Default: config first, schema best-effort.
-    const configData = await gatewayCallWithRetry<Record<string, unknown>>(
-      "config.get",
-      undefined,
-      10000,
-      1
-    );
+    // Default: fetch config and schema in parallel — both are read-only and independent.
+    let schemaErr: unknown = null;
+    const [configData, schemaData] = await Promise.all([
+      gatewayCallWithRetry<Record<string, unknown>>("config.get", undefined, 10000, 1),
+      gatewayCallWithRetry<Record<string, unknown>>("config.schema", undefined, 15000, 1).catch(
+        (err: unknown) => { schemaErr = err; return null; }
+      ),
+    ]);
 
-    let schemaData: Record<string, unknown> | null = null;
     let warning: string | undefined;
-    try {
-      schemaData = await gatewayCallWithRetry<Record<string, unknown>>(
-        "config.schema",
-        undefined,
-        15000,
-        1
-      );
-    } catch (err) {
-      warning = formatGatewayError(err);
-      console.warn("Config schema unavailable, serving config without schema:", err);
+    if (schemaErr !== null) {
+      warning = formatGatewayError(schemaErr);
+      console.warn("Config schema unavailable, serving config without schema:", schemaErr);
     }
 
     // Gateway config.get returns { parsed, resolved, hash }. parsed = openclaw.json shape (top-level: agents, gateway, channels, tools, etc.).

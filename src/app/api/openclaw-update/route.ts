@@ -32,6 +32,10 @@ function compareVersions(a: string, b: string): number {
 
 export const dynamic = "force-dynamic";
 
+// Cache update check for 5 minutes — CLI + GitHub calls are slow and version rarely changes
+const UPDATE_CACHE_TTL_MS = 5 * 60 * 1000;
+let updateCache: { data: Record<string, unknown>; expiresAt: number } | null = null;
+
 type UpdateStatusJson = {
   availability?: {
     available?: boolean;
@@ -65,19 +69,21 @@ type UpdateRunJson = {
  */
 export async function GET() {
   try {
-    let currentVersion = "";
-    let statusInfo: UpdateStatusJson | null = null;
-    try {
-      const out = await runCli(["--version"], 5000);
-      currentVersion = (out || "").trim().replace(/^openclaw\s+/i, "").trim();
-    } catch {
-      // Fallback: might be in config; leave currentVersion empty and we'll still show latest
+    // Serve from cache if fresh (version rarely changes)
+    const now = Date.now();
+    if (updateCache && now < updateCache.expiresAt) {
+      return NextResponse.json(updateCache.data, {
+        headers: { "Cache-Control": "public, max-age=300" },
+      });
     }
-    try {
-      statusInfo = await runCliJson<UpdateStatusJson>(["update", "status"], 10000);
-    } catch {
-      statusInfo = null;
-    }
+
+    // Run both CLI calls in parallel
+    const [versionOut, statusResult] = await Promise.all([
+      runCli(["--version"], 5000).catch(() => ""),
+      runCliJson<UpdateStatusJson>(["update", "status"], 10000).catch(() => null),
+    ]);
+    const currentVersion = (versionOut || "").trim().replace(/^openclaw\s+/i, "").trim();
+    const statusInfo: UpdateStatusJson | null = statusResult;
 
     const res = await fetch(GITHUB_RELEASES_URL, {
       next: { revalidate: 3600 },
@@ -110,7 +116,7 @@ export async function GET() {
       compareVersions(latestVersion, currentVersion) > 0
     );
 
-    return NextResponse.json({
+    const responseData = {
       currentVersion: currentVersion || null,
       latestVersion: latestVersion || null,
       updateAvailable,
@@ -119,6 +125,10 @@ export async function GET() {
       installKind: statusInfo?.update?.installKind || null,
       changelog: release.body?.trim() || null,
       releaseUrl: release.html_url || `https://github.com/openclaw/openclaw/releases/tag/${release.tag_name || "latest"}`,
+    };
+    updateCache = { data: responseData, expiresAt: Date.now() + UPDATE_CACHE_TTL_MS };
+    return NextResponse.json(responseData, {
+      headers: { "Cache-Control": "public, max-age=300" },
     });
   } catch (err) {
     console.error("OpenClaw update check error:", err);

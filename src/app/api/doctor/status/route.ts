@@ -6,6 +6,37 @@ import { getLastRunTimestamp } from "@/lib/doctor-history";
 
 export const dynamic = "force-dynamic";
 
+// Cache doctor status for 15s — it makes 4 parallel gateway calls with 8s timeouts each
+const DOCTOR_CACHE_TTL_MS = 15_000;
+let doctorCache: { data: ReturnType<typeof buildResponse>; expiresAt: number } | null = null;
+
+function buildResponse(params: {
+  overallHealth: "healthy" | "needs-attention" | "critical";
+  healthScore: number;
+  lastRunAt: number | null;
+  errors: number;
+  warnings: number;
+  healthy: number;
+  gatewayStatus: string;
+  gatewayPort: number;
+  gatewayPid: number | undefined;
+  issues: DoctorIssue[];
+}) {
+  return {
+    ts: Date.now(),
+    overallHealth: params.overallHealth,
+    healthScore: params.healthScore,
+    lastRunAt: params.lastRunAt,
+    summary: { errors: params.errors, warnings: params.warnings, healthy: params.healthy },
+    gateway: {
+      status: params.gatewayStatus,
+      port: params.gatewayPort,
+      ...(params.gatewayPid ? { pid: params.gatewayPid } : {}),
+    },
+    issues: params.issues,
+  };
+}
+
 type GatewayStatusPayload = {
   service?: {
     runtime?: { status?: string; pid?: number };
@@ -39,6 +70,12 @@ async function probeGatewayLiveness(): Promise<boolean> {
 }
 
 export async function GET() {
+  // Return cached result if still fresh — avoids 4 parallel gateway calls per poll
+  const now = Date.now();
+  if (doctorCache && now < doctorCache.expiresAt) {
+    return NextResponse.json({ ...doctorCache.data, ts: now });
+  }
+
   // Lightweight: probe gateway HTTP + RPC health + last run timestamp.
   // No subprocess spawning — safe for memory-constrained environments.
   const [alive, healthResult, statusResult, lastRunAt] = await Promise.all([
@@ -136,6 +173,9 @@ export async function GET() {
     : (alive ? "online" : "offline");
   const gatewayPort = statusResult?.gateway?.port || statusResult?.port?.port || 18789;
   const gatewayPid = statusResult?.service?.runtime?.pid;
+
+  const responseData = buildResponse({ overallHealth, healthScore, lastRunAt, errors, warnings, healthy, gatewayStatus, gatewayPort, gatewayPid, issues });
+  doctorCache = { data: responseData, expiresAt: now + DOCTOR_CACHE_TTL_MS };
 
   return NextResponse.json({
     ts: Date.now(),

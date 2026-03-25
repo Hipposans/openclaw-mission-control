@@ -38,14 +38,14 @@ export async function GET() {
       sessions: Session[];
       defaults: Record<string, unknown>;
     }>("sessions.list");
-    const now = Date.now();
+    const fetchedAt = Date.now();
     const rawSessions = Array.isArray(data.sessions) ? data.sessions : [];
     const sessions = rawSessions
       .map((session) => {
         const updatedAt = toEpochMs(session.updatedAt);
         const rawAgeMs = toNonNegativeNumber(session.ageMs, -1);
         const computedAgeMs =
-          updatedAt !== null ? Math.max(0, now - updatedAt) : 0;
+          updatedAt !== null ? Math.max(0, fetchedAt - updatedAt) : 0;
         const ageMs = rawAgeMs >= 0 ? rawAgeMs : computedAgeMs;
 
         return {
@@ -61,11 +61,8 @@ export async function GET() {
       })
       .sort((a, b) => (b.updatedAt as number) - (a.updatedAt as number));
 
-    return NextResponse.json({
-      ...data,
-      count: sessions.length,
-      sessions,
-    });
+    const result = { ...data, count: sessions.length, sessions };
+    return NextResponse.json(result);
   } catch (err) {
     console.error("Sessions GET error:", err);
     return NextResponse.json({ error: String(err) }, { status: 500 });

@@ -198,6 +198,11 @@ async function aggregateSessionEvents(): Promise<ActivityEvent[]> {
   return events;
 }
 
+// ── Server-side cache (avoids file I/O on every poll) ────────────────────────
+
+const ACTIVITY_CACHE_TTL_MS = 5_000;
+let activityCache: { events: ActivityEvent[]; expiresAt: number } | null = null;
+
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
@@ -205,29 +210,36 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const typeFilter = searchParams.get("type") as ActivityEventType | null;
 
-    // Gather all sources in parallel.
-    const [cronEvents, logEvents, sessionEvents] = await Promise.all([
-      aggregateCronEvents(),
-      aggregateLogEvents(),
-      aggregateSessionEvents(),
-    ]);
+    const now = Date.now();
+    let allEvents: ActivityEvent[];
 
-    let events: ActivityEvent[] = [
-      ...cronEvents,
-      ...logEvents,
-      ...sessionEvents,
-    ];
+    if (!typeFilter && activityCache && now < activityCache.expiresAt) {
+      allEvents = activityCache.events;
+    } else {
+      // Gather all sources in parallel.
+      const [cronEvents, logEvents, sessionEvents] = await Promise.all([
+        aggregateCronEvents(),
+        aggregateLogEvents(),
+        aggregateSessionEvents(),
+      ]);
 
-    // Apply optional type filter.
+      allEvents = [...cronEvents, ...logEvents, ...sessionEvents];
+      allEvents.sort((a, b) => b.timestamp - a.timestamp);
+      allEvents = allEvents.slice(0, 50);
+
+      if (!typeFilter) {
+        activityCache = { events: allEvents, expiresAt: now + ACTIVITY_CACHE_TTL_MS };
+      }
+    }
+
+    let events = allEvents;
     if (typeFilter) {
       events = events.filter((e) => e.type === typeFilter);
     }
 
-    // Sort newest-first and cap at 50.
-    events.sort((a, b) => b.timestamp - a.timestamp);
-    events = events.slice(0, 50);
-
-    return NextResponse.json(events);
+    return NextResponse.json(events, {
+      headers: { "Cache-Control": "public, max-age=5" },
+    });
   } catch (err) {
     console.error("Activity API error:", err);
     return NextResponse.json({ error: String(err) }, { status: 500 });

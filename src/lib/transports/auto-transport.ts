@@ -38,6 +38,20 @@ function isPermanentHttpStatus(status: number): boolean {
   return status === 401 || status === 403;
 }
 
+/**
+ * Errors that mean a specific tool/endpoint isn't exposed over HTTP, but
+ * the HTTP transport itself is healthy. Don't mark HTTP as failed for these —
+ * just silently route to CLI for this request only.
+ */
+function isSilentCliError(reason: string): boolean {
+  const lower = reason.toLowerCase();
+  return (
+    lower.includes("tool not available") ||
+    lower.includes("returned 404: tool") ||
+    lower.includes("origin not allowed")
+  );
+}
+
 export class AutoTransport implements OpenClawClient {
   private cli = new CliTransport();
   private http = new HttpTransport();
@@ -54,6 +68,8 @@ export class AutoTransport implements OpenClawClient {
   /** Circuit breaker: once true, HTTP is permanently disabled. */
   private permanentCliMode = false;
   private consecutiveHttpFailures = 0;
+  /** Once true, gatewayRpc always uses CLI (origin check blocks WebSocket). */
+  private rpcForcesCli = false;
 
   /** CLI concurrency limiter — prevents subprocess storms during gateway restarts. */
   private activeCli = 0;
@@ -172,7 +188,13 @@ export class AutoTransport implements OpenClawClient {
       return await fn(primary);
     } catch (err) {
       if (primary === this.http) {
-        this.markHttpFailed(errorToMessage(err));
+        const msg = errorToMessage(err);
+        // Tool-not-available and origin errors mean this specific operation
+        // doesn't work over HTTP, but the transport itself is healthy.
+        // Don't mark HTTP as failed — just fall through to CLI silently.
+        if (!isSilentCliError(msg)) {
+          this.markHttpFailed(msg);
+        }
         // Concurrency cap — stop runaway subprocess storms.
         if (this.activeCli >= this.maxCli) {
           throw new Error("Gateway busy — too many pending CLI operations");
@@ -214,7 +236,10 @@ export class AutoTransport implements OpenClawClient {
     if (this.preferHttp) {
       const result = await this.http.runCapture(args, timeout);
       if (result.code !== 0 && result.stderr?.includes("/tools/invoke")) {
-        this.markHttpFailed(result.stderr || `openclaw ${args.join(" ")} failed over HTTP`);
+        const reason = result.stderr || `openclaw ${args.join(" ")} failed over HTTP`;
+        if (!isSilentCliError(reason)) {
+          this.markHttpFailed(reason);
+        }
         // Concurrency limit before falling to CLI.
         if (this.activeCli >= this.maxCli) {
           return { code: 1, stdout: "", stderr: "Gateway busy — too many pending CLI operations" };
@@ -245,14 +270,27 @@ export class AutoTransport implements OpenClawClient {
     params?: Record<string, unknown>,
     timeout?: number,
   ): Promise<T> {
-    // gatewayRpc uses WebSocket/HTTP RPC — CLI fallback does not help here
-    // (the CLI would spawn a new gateway process or timeout). Fail fast and let
-    // callers serve stale cache instead of spawning an expensive subprocess.
-    await this.probe();
-    if (this.preferHttp) {
-      return this.http.gatewayRpc<T>(method, params, timeout);
+    // Once the RPC WebSocket is known to be blocked (origin check), skip HTTP entirely.
+    if (!this.permanentCliMode && !this.rpcForcesCli) {
+      await this.probe();
     }
-    throw new Error(`Gateway RPC unavailable for ${method} — gateway is not reachable via HTTP`);
+    if (this.preferHttp && !this.rpcForcesCli) {
+      try {
+        return await this.http.gatewayRpc<T>(method, params, timeout);
+      } catch (err) {
+        const msg = errorToMessage(err);
+        if (isSilentCliError(msg)) {
+          // Origin check or tool-not-available — WebSocket won't work from this host.
+          // Permanently route RPC to CLI without disrupting the HTTP probe for other ops.
+          this.rpcForcesCli = true;
+        } else {
+          this.markHttpFailed(msg);
+        }
+      }
+    }
+    // Fall back to CLI — `openclaw gateway call` connects to the running gateway
+    // via its local RPC socket and returns real session data.
+    return this.cli.gatewayRpc<T>(method, params, timeout);
   }
 
   readFile(path: string): Promise<string> {

@@ -392,7 +392,7 @@ export function TasksView() {
       </div>
 
       {/* Kanban columns — horizontal scroll; columns fixed width; card content wraps vertically */}
-      <div className="flex-1 min-h-0 min-w-0 overflow-x-auto overflow-y-hidden px-4 md:px-6 pb-6">
+      <div className="flex-1 min-h-0 min-w-0 overflow-x-auto overflow-y-auto px-4 md:px-6 pb-6">
         <div className="flex flex-col md:flex-row md:flex-nowrap gap-4 md:gap-6 pb-2 md:pb-0 w-max md:w-max">
           {columns.map((col) => {
           const colTasks = tasks.filter((t) => t.column === col.id);

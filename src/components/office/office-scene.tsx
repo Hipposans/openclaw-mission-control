@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { PixelCharacter } from './office-character';
-import { characters, hippoRotationOrder } from './office-data';
+import { characters } from './office-data';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Pos = { x: number; y: number };
@@ -381,7 +381,6 @@ export function OfficeScene() {
   const targetsRef       = useRef<PosMap>(buildInitialPositions());
   const rafRef           = useRef<number | null>(null);
   const lastRenderRef    = useRef<number>(0);
-  const hippoIndexRef    = useRef(0);
   const antonIndexRef    = useRef(0);
   // Per-char leisure waypoint index
   const idleIndexRef     = useRef<Record<string, number>>({
@@ -396,14 +395,19 @@ export function OfficeScene() {
       try {
         const res = await fetch('/api/agents', { cache: 'no-store' });
         if (!res.ok) return;
-        const data = await res.json() as { agents?: Array<{ id: string; name: string; status: string }> };
+        const data = await res.json() as { agents?: Array<{ id: string; name: string; status: string; runningSessions?: number; lastActive?: number | null }> };
         if (!data.agents) return;
         const active = new Set<string>();
+        const twoMinAgo = Date.now() - 2 * 60 * 1000;
         for (const agent of data.agents) {
           const charId =
             AGENT_ID_TO_CHAR[agent.id?.toLowerCase() ?? ''] ??
             AGENT_ID_TO_CHAR[agent.name?.toLowerCase() ?? ''];
-          if (charId && agent.status === 'active') active.add(charId);
+          // active = status=="active" (5min window) OR runningSessions>0 (2min window) OR lastActive within 2min
+          const recentlyActive = agent.lastActive != null && agent.lastActive > twoMinAgo;
+          if (charId && (agent.status === 'active' || (agent.runningSessions ?? 0) > 0 || recentlyActive)) {
+            active.add(charId);
+          }
         }
         setActiveAgentIds(active);
       } catch {
@@ -411,7 +415,7 @@ export function OfficeScene() {
       }
     }
     fetchAgents();
-    const poll = setInterval(fetchAgents, 10_000);
+    const poll = setInterval(fetchAgents, 5_000);
     return () => clearInterval(poll);
   }, []);
 
@@ -421,9 +425,7 @@ export function OfficeScene() {
     // Chars that just became active → send to work station
     for (const charId of activeAgentIds) {
       if (!prev.has(charId)) {
-        const stationKey = charId === 'hippo'
-          ? hippoRotationOrder[hippoIndexRef.current]
-          : PRIMARY_STATION[charId];
+        const stationKey = PRIMARY_STATION[charId];
         const sp = stationKey ? standPos[stationKey] : null;
         if (sp) targetsRef.current = { ...targetsRef.current, [charId]: { ...sp } };
       }
@@ -481,15 +483,7 @@ export function OfficeScene() {
     document.addEventListener('visibilitychange', onVisibility);
     start();
 
-    // Hippo cycles work stations every 8s (only when active)
-    const hippoTimer = setInterval(() => {
-      hippoIndexRef.current = (hippoIndexRef.current + 1) % hippoRotationOrder.length;
-      if (activeRef.current.has('hippo')) {
-        const key = hippoRotationOrder[hippoIndexRef.current];
-        const sp = standPos[key];
-        if (sp) targetsRef.current = { ...targetsRef.current, hippo: { ...sp } };
-      }
-    }, 8000);
+    // Hippo stays at coord desk when active — no rotation timer needed
 
     // Anton patrols every 5s (always)
     const antonTimer = setInterval(() => {
@@ -529,7 +523,6 @@ export function OfficeScene() {
     return () => {
       if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
       document.removeEventListener('visibilitychange', onVisibility);
-      clearInterval(hippoTimer);
       clearInterval(antonTimer);
       idleTimers.forEach(clearInterval);
       leisureTimers.forEach(clearInterval);
@@ -559,6 +552,10 @@ export function OfficeScene() {
     >
       <title>OpenClaw Office</title>
       <StaticScene />
+      {/* Debug bar — shows which agents the office currently detects as active */}
+      <text x={8} y={556} fontSize={10} fill="#888" fontFamily="monospace">
+        {`active: [${Array.from(activeAgentIds).join(', ') || 'none'}]`}
+      </text>
       {characters.map(char => {
         const pos = renderPositions[char.id] ?? buildInitialPositions()[char.id];
         const state = getCharState(char.id, pos);
@@ -571,6 +568,7 @@ export function OfficeScene() {
             x={pos.x}
             y={pos.y}
             state={state}
+            isActive={activeAgentIds.has(char.id)}
           />
         );
       })}

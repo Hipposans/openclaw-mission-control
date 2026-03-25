@@ -67,12 +67,42 @@ async function buildStatusPayload() {
   });
 }
 
+function isSqliteUnavailable(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    err.message.includes("sqlite3 binary not found")
+  );
+}
+
 export async function GET(request: NextRequest) {
   if (request.nextUrl.searchParams.get("poll") === "1") {
-    const alerts = await pollPendingAlertFirings(20);
-    return NextResponse.json({ ok: true, alerts, timestamp: Date.now() });
+    try {
+      const alerts = await pollPendingAlertFirings(20);
+      return NextResponse.json({ ok: true, alerts, timestamp: Date.now() });
+    } catch (err) {
+      if (isSqliteUnavailable(err)) {
+        return NextResponse.json({ ok: true, alerts: [], timestamp: Date.now() });
+      }
+      throw err;
+    }
   }
-  return buildStatusPayload();
+  try {
+    return await buildStatusPayload();
+  } catch (err) {
+    if (isSqliteUnavailable(err)) {
+      return NextResponse.json({
+        ok: true,
+        monitorEnabled: false,
+        lastEvaluatedMs: null,
+        rules: [],
+        evaluations: [],
+        recentFirings: [],
+        providerCapabilities: {},
+        timestamp: Date.now(),
+      });
+    }
+    throw err;
+  }
 }
 
 export async function POST(request: NextRequest) {

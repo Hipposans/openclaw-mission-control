@@ -191,7 +191,8 @@ async function buildChannelStatuses(): Promise<ChannelStatus[]> {
 export async function GET() {
   try {
     const channels = await buildChannelStatuses();
-    return NextResponse.json({ channels });
+    const result = { channels };
+    return NextResponse.json(result);
   } catch (err) {
     console.error("Channels GET error:", err);
     return NextResponse.json({ error: String(err) }, { status: 500 });

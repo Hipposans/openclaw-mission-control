@@ -230,13 +230,14 @@ export async function GET(request: NextRequest) {
     // Collect unique sources for the filter UI
     const sources = Array.from(sourceSet).sort();
 
-    return NextResponse.json({
+    const responseData = {
       entries: filtered.slice(0, limit),
       total: filtered.length,
       sources,
       fileSizes,
       stats,
-    });
+    };
+    return NextResponse.json(responseData);
   } catch (err) {
     console.error("Logs API error:", err);
     return NextResponse.json({ error: String(err) }, { status: 500 });

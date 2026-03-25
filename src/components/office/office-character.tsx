@@ -9,10 +9,11 @@ interface PixelCharacterProps {
   x: number;
   y: number;
   state: 'working' | 'idle' | 'patrolling';
+  isActive?: boolean;
   facing?: CharacterFacing;
 }
 
-export function PixelCharacter({ name, shirtColor, pantsColor, x, y, state, facing }: PixelCharacterProps) {
+export function PixelCharacter({ name, shirtColor, pantsColor, x, y, state, isActive, facing }: PixelCharacterProps) {
   const isFront = facing !== undefined ? facing === 'front' : state !== 'working';
   const isWorking = state === 'working';
 
@@ -42,7 +43,8 @@ export function PixelCharacter({ name, shirtColor, pantsColor, x, y, state, faci
   const labelW = labelText.length * 5.5 + 14;
   const labelX = cx - labelW / 2;
   const labelY = headY - 10;
-  const dotColor = isWorking ? '#3b82f6' : '#888888';
+  // Dot is blue if the agent is active (even while walking to their desk), gray otherwise
+  const dotColor = isActive ? '#3b82f6' : '#888888';
 
   // ── Working / sitting (back-facing) ──────────────────────────────────────
   if (isWorking) {

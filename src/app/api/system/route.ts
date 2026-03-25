@@ -321,9 +321,11 @@ export async function GET() {
     }
 
     systemInFlight = (async () => {
-      const config = await readConfigFile();
-
-      const gatewaySessions = await fetchGatewaySessions(10000).catch(() => []);
+      // Fetch config and sessions in parallel — independent sources.
+      const [config, gatewaySessions] = await Promise.all([
+        readConfigFile(),
+        fetchGatewaySessions(10000).catch(() => []),
+      ]);
       const sessions = toSessionInfo(gatewaySessions);
       const sessionsByAgent = new Map<string, NormalizedGatewaySession[]>();
       for (const s of gatewaySessions) {

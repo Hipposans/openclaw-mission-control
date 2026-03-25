@@ -51,7 +51,7 @@ type AgentFull = {
 
 const SUBAGENT_RECENT_WINDOW_MS = 30 * 60 * 1000;
 const SUBAGENT_ACTIVE_WINDOW_MS = 2 * 60 * 1000;
-const AGENTS_CACHE_TTL_MS = 5000;
+const AGENTS_CACHE_TTL_MS = 15000;
 const AGENTS_CACHE_MAX_STALE_MS = 60000;
 
 type AgentsGetPayload = {
@@ -310,13 +310,12 @@ export async function GET() {
       return NextResponse.json({ ...agentsCache.payload, stale: false });
     }
 
-    // 1. Get config via gateway RPC (replaces both CLI agents list and file read)
-    let configData: Awaited<ReturnType<typeof fetchConfig>> | null = null;
-    try {
-      configData = await fetchConfig(10000);
-    } catch {
-      // Gateway might not be available — fall back to file
-    }
+    // 1. Fetch config, channel status, and sessions in parallel — all three are independent gateway RPCs
+    const [configData, channelStatusRawPre, gatewaySessionsPre] = await Promise.all([
+      fetchConfig(10000).catch(() => null),
+      gatewayCallWithRetry<Record<string, unknown>>("channels.status", {}, 3000).catch(() => ({})),
+      fetchGatewaySessions(10000).catch(() => [] as Awaited<ReturnType<typeof fetchGatewaySessions>>),
+    ]);
 
     // Fallback: read config from file if gateway unavailable
     let config: Record<string, unknown> = {};
@@ -413,12 +412,8 @@ export async function GET() {
       };
     });
 
-    // Use gateway RPC for channel status (replaces CLI "channels status --probe")
-    const channelStatusRaw = await gatewayCallWithRetry<Record<string, unknown>>(
-      "channels.status",
-      {},
-      12000,
-    ).catch(() => ({}));
+    // Channel status fetched in parallel above
+    const channelStatusRaw = channelStatusRawPre;
     const connectedChannels = connectedChannelsFromStatus(channelStatusRaw);
 
     // Build a lookup from merged config list.
@@ -446,15 +441,14 @@ export async function GET() {
       }
     }
 
-    // Session state comes from gateway RPC (source of truth), not local files.
-    let gatewaySessions = [] as Awaited<ReturnType<typeof fetchGatewaySessions>>;
+    // Session state fetched in parallel above
+    let gatewaySessions = gatewaySessionsPre;
     let sessionsByAgent = new Map<string, { sessionCount: number; runningSessions: number; totalTokens: number; lastActive: number }>();
     const runtimeSubagentsByAgent = new Map<
       string,
       AgentFull["runtimeSubagents"]
     >();
     try {
-      gatewaySessions = await fetchGatewaySessions(10000);
       sessionsByAgent = summarizeSessionsByAgent(gatewaySessions);
 
       const now = Date.now();

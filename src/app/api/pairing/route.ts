@@ -159,23 +159,15 @@ async function listDmRequestsFromCli(): Promise<DmRequest[]> {
 
 /* ── GET: list all pending requests ──────────────── */
 
-export async function GET() {
-  const home = getOpenClawHome();
-  let dmRequests: DmRequest[] = [];
-  const deviceRequests: DeviceRequest[] = [];
-
-  // 1) Preferred: ask OpenClaw CLI directly (supports account-aware pairing).
-  try {
-    dmRequests = await listDmRequestsFromCli();
-  } catch {
-    // 2) Fallback: scan credentials pairing files for older/limited environments.
-    const scanned: DmRequest[] = [];
-    const credDirs = [join(home, "credentials")];
-    for (const credDir of credDirs) {
-      try {
-        const files = await readdir(credDir);
-        const pairingFiles = files.filter((f) => f.endsWith("-pairing.json"));
-        for (const file of pairingFiles) {
+async function listDmRequestsFallback(home: string): Promise<DmRequest[]> {
+  const scanned: DmRequest[] = [];
+  const credDirs = [join(home, "credentials")];
+  for (const credDir of credDirs) {
+    try {
+      const files = await readdir(credDir);
+      const pairingFiles = files.filter((f) => f.endsWith("-pairing.json"));
+      await Promise.all(
+        pairingFiles.map(async (file) => {
           const channel = file.replace("-pairing.json", "");
           try {
             const raw = await readFile(join(credDir, file), "utf-8");
@@ -184,24 +176,28 @@ export async function GET() {
           } catch {
             // File may be empty or malformed
           }
-        }
-      } catch {
-        // credentials dir may not exist
-      }
+        })
+      );
+    } catch {
+      // credentials dir may not exist
     }
-    dmRequests = dedupeDmRequests(scanned);
   }
+  return dedupeDmRequests(scanned);
+}
 
-  // 2. Device pairing requests
-  try {
-    const data = await gatewayCall<{
-      pending: DeviceRequest[];
-      paired: unknown[];
-    }>("device.pair.list", {}, 8000);
-    deviceRequests.push(...(data.pending || []));
-  } catch {
-    // gateway may be unavailable
-  }
+export async function GET() {
+  const home = getOpenClawHome();
+  const deviceRequests: DeviceRequest[] = [];
+
+  // Run CLI/file scan and gateway call in parallel
+  const [dmRequests, devicePairData] = await Promise.all([
+    listDmRequestsFromCli().catch(() => listDmRequestsFallback(home)),
+    gatewayCall<{ pending: DeviceRequest[]; paired: unknown[] }>(
+      "device.pair.list", {}, 8000
+    ).catch(() => ({ pending: [] as DeviceRequest[], paired: [] })),
+  ]);
+
+  deviceRequests.push(...(devicePairData.pending || []));
 
   const body = {
     dm: dmRequests,

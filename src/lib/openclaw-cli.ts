@@ -7,6 +7,11 @@ const exec = promisify(execFile);
 /** Env vars for all CLI subprocesses. Mission Control is always a trusted local process. */
 const CLI_ENV = { ...process.env, NO_COLOR: "1", OPENCLAW_ALLOW_INSECURE_PRIVATE_WS: "1" };
 
+/** On Windows, .cmd files must be run with shell:true via execFile/spawn. */
+function needsShell(bin: string): boolean {
+  return process.platform === "win32" || bin.toLowerCase().endsWith(".cmd");
+}
+
 // ── Concurrency semaphore ──────────────────────────────────────────────────
 // Caps the number of simultaneously live CLI subprocesses. Callers that
 // exceed the limit are queued and resume in FIFO order as slots free up.
@@ -65,6 +70,7 @@ export async function runCliCaptureBoth(
         env: CLI_ENV,
         timeout,
         stdio: ["ignore", "pipe", "pipe"],
+        shell: needsShell(bin),
       });
       let stdout = "";
       let stderr = "";
@@ -103,6 +109,7 @@ export async function runCli(
           env: CLI_ENV,
           timeout,
           stdio: ["pipe", "pipe", "pipe"],
+          shell: needsShell(bin),
         });
         let stdout = "";
         let stderr = "";
@@ -120,6 +127,7 @@ export async function runCli(
     const { stdout } = await exec(bin, args, {
       timeout,
       env: CLI_ENV,
+      shell: needsShell(bin),
     });
     return stdout;
   } finally {

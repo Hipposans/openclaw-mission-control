@@ -1,4 +1,5 @@
 import { gatewayCall } from "@/lib/openclaw";
+import { runCliJson } from "@/lib/openclaw-cli";
 
 export type GatewaySession = {
   key?: string | null;
@@ -136,9 +137,21 @@ function normalizeGatewaySession(
 }
 
 export async function fetchGatewaySessions(timeout = 12000): Promise<NormalizedGatewaySession[]> {
-  const data = await gatewayCall<SessionsListResult>("sessions.list", undefined, timeout);
   const now = Date.now();
-  const raw = Array.isArray(data.sessions) ? data.sessions : [];
+  let raw: GatewaySession[] = [];
+  try {
+    const data = await gatewayCall<SessionsListResult>("sessions.list", undefined, timeout);
+    raw = Array.isArray(data.sessions) ? data.sessions : [];
+  } catch {
+    // WebSocket RPC may be unavailable (e.g. scope restriction on gateway token).
+    // Fall back to CLI which connects via the gateway's local socket.
+    try {
+      const data = await runCliJson<SessionsListResult>(["gateway", "call", "sessions.list"], timeout);
+      raw = Array.isArray(data.sessions) ? data.sessions : [];
+    } catch {
+      // Neither path worked — return empty; callers handle missing session data gracefully.
+    }
+  }
   return raw
     .map((session) => normalizeGatewaySession(session, now))
     .sort((a, b) => b.updatedAt - a.updatedAt);
