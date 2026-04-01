@@ -24,6 +24,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Allowlist: package names may only contain safe characters
+  // Covers npm scoped packages (@org/pkg), brew formulas, pip packages
+  if (!/^[@a-zA-Z0-9][-a-zA-Z0-9._/@]*$/.test(pkg)) {
+    return new Response(
+      JSON.stringify({ error: "Invalid package name" }),
+      { status: 400, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
   // Build command based on kind
   let cmd: string;
   let args: string[];
@@ -59,7 +68,7 @@ export async function POST(request: NextRequest) {
       );
 
       const child = spawn(cmd, args, {
-        env: { ...process.env, NO_COLOR: "0", HOMEBREW_COLOR: "1", OPENCLAW_ALLOW_INSECURE_PRIVATE_WS: "1" },
+        env: { ...process.env, NO_COLOR: "0", HOMEBREW_COLOR: "1" },
         timeout: 240000,
         stdio: ["pipe", "pipe", "pipe"],
       });

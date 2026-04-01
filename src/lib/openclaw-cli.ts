@@ -1,11 +1,45 @@
 import { execFile, spawn } from "child_process";
 import { promisify } from "util";
+import { dirname, join } from "path";
+import { access } from "fs/promises";
 import { getOpenClawBin } from "./paths";
 
 const exec = promisify(execFile);
 
+/**
+ * On Windows, cmd.exe strips quotes from JSON arguments passed to .cmd wrappers,
+ * breaking `--params '{"key":"val"}'`. Work around by running node + openclaw.mjs
+ * directly, which bypasses shell argument processing entirely.
+ *
+ * Returns { bin: "node", args: [mjsPath, ...originalArgs] } on Windows when the
+ * .mjs entrypoint exists, or null to fall back to the original approach.
+ */
+async function resolveWindowsNodeArgs(
+  binPath: string,
+  originalArgs: string[],
+): Promise<{ bin: string; spawnArgs: string[] } | null> {
+  if (process.platform !== "win32") return null;
+  // binPath may be .cmd or extensionless (from `which`). The .mjs lives at:
+  //   <npm-global-bin-dir>/node_modules/openclaw/openclaw.mjs
+  let binDir = dirname(binPath);
+  // `which openclaw` on Windows returns a MSYS/Git-bash path like /c/Users/...
+  // which Node.js path.join misinterprets as a relative path starting with \c\.
+  // Convert to a proper Windows path before probing.
+  const msys = binDir.match(/^\/([a-zA-Z])(\/.*)?$/);
+  if (msys) {
+    binDir = `${msys[1].toUpperCase()}:${(msys[2] ?? "/").replace(/\//g, "\\")}`;
+  }
+  const mjsPath = join(binDir, "node_modules", "openclaw", "openclaw.mjs");
+  try {
+    await access(mjsPath);
+    return { bin: "node", spawnArgs: [mjsPath, ...originalArgs] };
+  } catch {
+    return null;
+  }
+}
+
 /** Env vars for all CLI subprocesses. Mission Control is always a trusted local process. */
-const CLI_ENV = { ...process.env, NO_COLOR: "1", OPENCLAW_ALLOW_INSECURE_PRIVATE_WS: "1" };
+const CLI_ENV = { ...process.env, NO_COLOR: "1" };
 
 /** On Windows, .cmd files must be run with shell:true via execFile/spawn. */
 function needsShell(bin: string): boolean {
@@ -65,12 +99,15 @@ export async function runCliCaptureBoth(
   await acquireCliSlot();
   try {
     const bin = await getOpenClawBin();
+    const winNode = await resolveWindowsNodeArgs(bin, args);
+    const spawnBin = winNode ? winNode.bin : bin;
+    const spawnArgs = winNode ? winNode.spawnArgs : args;
     return await new Promise((resolve, reject) => {
-      const child = spawn(bin, args, {
+      const child = spawn(spawnBin, spawnArgs, {
         env: CLI_ENV,
         timeout,
         stdio: ["ignore", "pipe", "pipe"],
-        shell: needsShell(bin),
+        shell: winNode ? false : needsShell(bin),
       });
       let stdout = "";
       let stderr = "";
@@ -104,12 +141,15 @@ export async function runCli(
     const bin = await getOpenClawBin();
     if (stdin !== undefined) {
       // Use spawn for stdin piping
+      const winNode = await resolveWindowsNodeArgs(bin, args);
+      const spawnBin = winNode ? winNode.bin : bin;
+      const spawnArgs = winNode ? winNode.spawnArgs : args;
       return await new Promise((resolve, reject) => {
-        const child = spawn(bin, args, {
+        const child = spawn(spawnBin, spawnArgs, {
           env: CLI_ENV,
           timeout,
           stdio: ["pipe", "pipe", "pipe"],
-          shell: needsShell(bin),
+          shell: winNode ? false : needsShell(bin),
         });
         let stdout = "";
         let stderr = "";
@@ -123,6 +163,15 @@ export async function runCli(
         child.stdin.write(stdin);
         child.stdin.end();
       });
+    }
+    const winNode = await resolveWindowsNodeArgs(bin, args);
+    if (winNode) {
+      const { stdout } = await exec(winNode.bin, winNode.spawnArgs, {
+        timeout,
+        env: CLI_ENV,
+        shell: false,
+      });
+      return stdout;
     }
     const { stdout } = await exec(bin, args, {
       timeout,
@@ -196,22 +245,33 @@ export async function runCliJson<T>(
   args: string[],
   timeout = 15000
 ): Promise<T> {
+  // Use runCliCaptureBoth so we can check stderr when stdout is empty.
+  // On Windows, openclaw.mjs spawned without a shell writes --json output
+  // to stderr instead of stdout (observed with node openclaw.mjs subprocess).
+  const context = `openclaw ${args.join(" ")} --json`;
+  let result: RunCliResult;
   try {
-    const stdout = await runCli([...args, "--json"], timeout);
-    return parseJsonFromCliOutput<T>(stdout, `openclaw ${args.join(" ")} --json`);
+    result = await runCliCaptureBoth([...args, "--json"], timeout);
   } catch (err) {
+    // Spawn-level error — try legacy stdout-only path as fallback.
     const stdout = typeof (err as { stdout?: unknown })?.stdout === "string"
       ? String((err as { stdout?: unknown }).stdout)
       : "";
     if (stdout.trim()) {
       try {
-        return parseJsonFromCliOutput<T>(stdout, `openclaw ${args.join(" ")} --json`);
+        return parseJsonFromCliOutput<T>(stdout, context);
       } catch {
         // Fall through to original error.
       }
     }
     throw err;
   }
+  // Try stdout first (normal case), then stderr (Windows mjs subprocess quirk).
+  const output = result.stdout.trim() ? result.stdout : result.stderr;
+  if (!output.trim() && result.code !== 0) {
+    throw new Error(`Command failed (exit ${result.code}): ${result.stderr || result.stdout}`);
+  }
+  return parseJsonFromCliOutput<T>(output, context);
 }
 
 export async function gatewayCall<T>(

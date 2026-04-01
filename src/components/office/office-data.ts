@@ -43,12 +43,13 @@ export const characters: CharacterDef[] = [
   { id: 'quan',    name: 'Quan',    shirtColor: '#4f86c6', pantsColor: '#2d4a6e', allowedStations: ['backend'],                                            defaultState: 'working'    },
   { id: 'jerry',   name: 'Jerry',   shirtColor: '#5cb85c', pantsColor: '#2d5a2d', allowedStations: ['appWebsite'],                                         defaultState: 'working'    },
   { id: 'kicko',   name: 'Kicko',   shirtColor: '#e8a838', pantsColor: '#7a4f10', allowedStations: ['sales'],                                              defaultState: 'working'    },
+  { id: 'martin',  name: 'Martin',  shirtColor: '#c0392b', pantsColor: '#7b241c', allowedStations: ['sales'],                                              defaultState: 'working'    },
   { id: 'david',   name: 'David',   shirtColor: '#c678a0', pantsColor: '#5a2d4a', allowedStations: ['design'],                                             defaultState: 'working'    },
   { id: 'hippo',   name: 'Hippo',   shirtColor: '#9b59b6', pantsColor: '#4a2060', allowedStations: ['backend','appWebsite','sales','design','coordinator'], defaultState: 'working'    },
   { id: 'anton',   name: 'Anton',   shirtColor: '#1a1a1a', pantsColor: '#0a0a0a', allowedStations: ['patrol'],                                             defaultState: 'patrolling' },
   { id: 'jan',     name: 'Jan',     shirtColor: '#e67e22', pantsColor: '#7d4000', allowedStations: [],                                                     defaultState: 'idle'       },
   { id: 'krister', name: 'Krister', shirtColor: '#1abc9c', pantsColor: '#0d6655', allowedStations: [],                                                     defaultState: 'idle'       },
-  { id: 'tony',    name: 'Tony',    shirtColor: '#e74c3c', pantsColor: '#7b241c', allowedStations: [],                                                     defaultState: 'idle'       },
+  { id: 'tony',    name: 'Tony',    shirtColor: '#e74c3c', pantsColor: '#7b241c', allowedStations: ['docs'],                                                defaultState: 'idle'       },
 ];
 
 export const stations: StationDef[] = [

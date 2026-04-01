@@ -232,7 +232,7 @@ function InstallTerminal({
   // Elapsed timer
   useEffect(() => {
     if (!running) return;
-    const iv = setInterval(() => setElapsed(Math.floor((Date.now() - startTime.current) / 1000)), 200);
+    const iv = setInterval(() => setElapsed(Math.floor((Date.now() - startTime.current) / 1000)), 1000);
     return () => clearInterval(iv);
   }, [running]);
 

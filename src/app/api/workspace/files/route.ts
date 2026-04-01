@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readdir, realpath, stat } from "fs/promises";
-import { extname, join, relative } from "path";
+import { extname, join, relative, resolve } from "path";
+import { homedir, tmpdir } from "os";
+import { getOpenClawHome } from "@/lib/paths";
 
 type WorkspaceFileRow = {
   relativePath: string;
@@ -10,6 +12,22 @@ type WorkspaceFileRow = {
 };
 
 const MAX_FILES = 2000;
+
+function getAllowedWorkspaceRoots(): string[] {
+  const home = getOpenClawHome();
+  return [
+    join(home, "workspace"),
+    join(home, "workspace-openclaw"),
+    join(homedir(), "workspace"),
+    tmpdir(),
+    process.env.OPENCLAW_WORKSPACE || "",
+  ].filter(Boolean).map(p => resolve(p));
+}
+
+function isPathAllowed(resolvedPath: string): boolean {
+  const allowed = getAllowedWorkspaceRoots();
+  return allowed.some(root => resolvedPath === root || resolvedPath.startsWith(root + "/") || resolvedPath.startsWith(root + "\\"));
+}
 const MAX_DEPTH = 8;
 const SKIP_DIRS = new Set([
   "node_modules",
@@ -88,6 +106,13 @@ export async function GET(request: NextRequest) {
     workspacePath = await realpath(rawPath);
   } catch {
     // keep raw path for better error message
+  }
+
+  if (!isPathAllowed(workspacePath)) {
+    return NextResponse.json(
+      { error: "Path is outside allowed workspace directories" },
+      { status: 403 }
+    );
   }
 
   let s;

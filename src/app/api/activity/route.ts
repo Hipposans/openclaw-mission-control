@@ -200,7 +200,7 @@ async function aggregateSessionEvents(): Promise<ActivityEvent[]> {
 
 // ── Server-side cache (avoids file I/O on every poll) ────────────────────────
 
-const ACTIVITY_CACHE_TTL_MS = 5_000;
+const ACTIVITY_CACHE_TTL_MS = 15_000;
 let activityCache: { events: ActivityEvent[]; expiresAt: number } | null = null;
 
 // ── Route handler ─────────────────────────────────────────────────────────────

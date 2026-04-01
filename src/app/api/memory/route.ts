@@ -297,17 +297,20 @@ export async function DELETE(request: NextRequest) {
     if (!file) {
       return NextResponse.json({ error: "file required" }, { status: 400 });
     }
-    const safePath = String(file).replace(/\.\./g, "").replace(/^\/+/, "");
-    if (!safePath.endsWith(".md")) {
+    const memoryBase = resolve(join(WORKSPACE, "memory"));
+    const fullPath = resolve(join(WORKSPACE, "memory", file));
+    if (!fullPath.startsWith(memoryBase + "/") && !fullPath.startsWith(memoryBase + "\\") && fullPath !== memoryBase) {
       return NextResponse.json({ error: "invalid file" }, { status: 400 });
     }
-    const fullPath = join(WORKSPACE, "memory", safePath);
+    if (!fullPath.endsWith(".md")) {
+      return NextResponse.json({ error: "invalid file" }, { status: 400 });
+    }
     const s = await stat(fullPath);
     if (!s.isFile()) {
       return NextResponse.json({ error: "not a file" }, { status: 400 });
     }
     await unlink(fullPath);
-    return NextResponse.json({ ok: true, file: safePath, deleted: true });
+    return NextResponse.json({ ok: true, file: basename(fullPath), deleted: true });
   } catch (err) {
     console.error("Memory DELETE error:", err);
     return NextResponse.json({ error: String(err) }, { status: 500 });
@@ -326,8 +329,12 @@ export async function PATCH(request: NextRequest) {
     if (!fileName || !action) {
       return NextResponse.json({ error: "action and file required" }, { status: 400 });
     }
-    const safePath = String(fileName).replace(/\.\./g, "").replace(/^\/+/, "");
-    const fullPath = join(WORKSPACE, "memory", safePath);
+    const memoryBase = resolve(join(WORKSPACE, "memory"));
+    const fullPath = resolve(join(WORKSPACE, "memory", fileName));
+    if (!fullPath.startsWith(memoryBase + "/") && !fullPath.startsWith(memoryBase + "\\") && fullPath !== memoryBase) {
+      return NextResponse.json({ error: "invalid file" }, { status: 400 });
+    }
+    const safePath = basename(fullPath);
 
     if (action === "rename") {
       if (!newName) {
@@ -385,9 +392,13 @@ export async function POST(request: NextRequest) {
     const agentId = String(body.agentId || "").trim();
 
     if (file) {
-      const safePath = file.replace(/\.\./g, "").replace(/^\/+/, "");
-      if (!safePath.endsWith(".md")) {
+      if (!file.endsWith(".md")) {
         return NextResponse.json({ error: "invalid file" }, { status: 400 });
+      }
+      const memoryBase = resolve(join(WORKSPACE, "memory"));
+      const candidatePath = resolve(join(WORKSPACE, "memory", file.replace(/^\/+/, "")));
+      if (!candidatePath.startsWith(memoryBase + "/") && !candidatePath.startsWith(memoryBase + "\\") && candidatePath !== memoryBase) {
+        return NextResponse.json({ error: "Invalid path" }, { status: 403 });
       }
     }
 
@@ -417,7 +428,7 @@ export async function POST(request: NextRequest) {
 
     let vectorState: VectorState | undefined;
     if (file) {
-      const safePath = file.replace(/\.\./g, "").replace(/^\/+/, "");
+      const safePath = basename(file.replace(/^\/+/, ""));
       try {
         const agents = agentId ? await getCliAgents() : [];
         const workspaceDir = agentId ? resolveAgentWorkspace(agentId, agents) : WORKSPACE;
@@ -467,18 +478,19 @@ export async function GET(request: NextRequest) {
 
   try {
     if (file) {
-      const safePath = file.replace(/\.\./g, "").replace(/^\/+/, "");
-      if (!safePath.endsWith(".md")) {
+      if (!String(file).endsWith(".md")) {
         return NextResponse.json({ error: "invalid file" }, { status: 400 });
       }
-      const fullPath = workspaceRoot
-        ? join(WORKSPACE, safePath)
-        : join(WORKSPACE, "memory", safePath);
+      const baseDir = workspaceRoot ? resolve(WORKSPACE) : resolve(join(WORKSPACE, "memory"));
+      const fullPath = resolve(join(baseDir, String(file).replace(/^\/+/, "")));
+      if (!fullPath.startsWith(baseDir + "/") && !fullPath.startsWith(baseDir + "\\") && fullPath !== baseDir) {
+        return NextResponse.json({ error: "Invalid path" }, { status: 403 });
+      }
       const content = await readFile(fullPath, "utf-8");
       const s = await stat(fullPath);
       const words = content.split(/\s+/).filter(Boolean).length;
       const size = Buffer.byteLength(content, "utf-8");
-      return NextResponse.json({ content, words, size, file: safePath, mtime: s.mtime.toISOString() });
+      return NextResponse.json({ content, words, size, file: basename(fullPath), mtime: s.mtime.toISOString() });
     }
 
     if (agentMemory) {

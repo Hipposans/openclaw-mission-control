@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { access, readFile } from "fs/promises";
 import { constants as fsConstants } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import { homedir, tmpdir } from "os";
+import { join, resolve } from "path";
 import { getGatewayPort, getOpenClawHome } from "@/lib/paths";
 import { runCliJson } from "@/lib/openclaw-cli";
 
@@ -440,11 +440,19 @@ export async function POST(request: NextRequest) {
             // Gateway returns {ok, path, targetId, url} — read the image from disk
             const imgPath = typeof data.path === "string" ? data.path : null;
             if (imgPath) {
-              try {
-                const imgBuffer = await readFile(imgPath);
-                result = { image: `data:image/png;base64,${imgBuffer.toString("base64")}` };
-              } catch {
-                result = data;
+              // Restrict to known safe directories (tmpdir and openclaw home)
+              const resolvedImg = resolve(imgPath);
+              const allowedRoots = [tmpdir(), getOpenClawHome()];
+              const imgAllowed = allowedRoots.some(r => resolvedImg === r || resolvedImg.startsWith(r + "/") || resolvedImg.startsWith(r + "\\"));
+              if (!imgAllowed) {
+                result = { error: "Screenshot path is outside allowed directories" };
+              } else {
+                try {
+                  const imgBuffer = await readFile(resolvedImg);
+                  result = { image: `data:image/png;base64,${imgBuffer.toString("base64")}` };
+                } catch {
+                  result = data;
+                }
               }
             } else {
               result = data;

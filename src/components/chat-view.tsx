@@ -1034,7 +1034,7 @@ export function ChatView({ isVisible = true }: { isVisible?: boolean }) {
       }
     };
     tick();
-    const id = setInterval(tick, 5000);
+    const id = setInterval(tick, 30000);
     return () => clearInterval(id);
   }, [isVisible]);
 

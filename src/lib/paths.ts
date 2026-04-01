@@ -126,6 +126,10 @@ const BIN_CANDIDATES = [
   "/usr/bin/openclaw",
   join(homedir(), ".local/bin/openclaw"),
   join(homedir(), ".npm-global/bin/openclaw"),
+  // Windows: npm global bin directory
+  ...(process.env.APPDATA
+    ? [join(process.env.APPDATA, "npm", "openclaw.cmd")]
+    : []),
 ];
 
 async function fileExists(p: string): Promise<boolean> {
@@ -147,7 +151,7 @@ export async function getOpenClawBin(): Promise<string> {
     return _bin;
   }
 
-  // 2. which
+  // 2. which / where (Windows)
   try {
     const { stdout } = await exec("which", ["openclaw"], { timeout: 3000 });
     const resolved = stdout.trim();
@@ -157,7 +161,21 @@ export async function getOpenClawBin(): Promise<string> {
       return _bin;
     }
   } catch {
-    // continue
+    // continue — 'which' is not available on Windows
+  }
+
+  if (process.platform === "win32") {
+    try {
+      const { stdout } = await exec("where", ["openclaw"], { timeout: 3000 });
+      const resolved = stdout.trim().split(/\r?\n/)[0].trim();
+      if (resolved) {
+        _bin = resolved;
+        _binDone = true;
+        return _bin;
+      }
+    } catch {
+      // continue
+    }
   }
 
   // 3. Probe common locations

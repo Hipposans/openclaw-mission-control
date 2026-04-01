@@ -75,7 +75,7 @@ export function PixelCharacter({ name, shirtColor, pantsColor, x, y, state, isAc
         {/* Head */}
         <rect x={cx - 11} y={sHeadY}  width={22} height={22} rx={2} fill="#f0c896" />
         {/* Hair (back) */}
-        <rect x={cx - 11} y={sHeadY}  width={22} height={8}  rx={2} fill="#2a1a0a" />
+        <rect x={cx - 11} y={sHeadY}  width={22} height={8}  rx={2} fill="#000000" />
         {/* Name label */}
         <rect x={sLabelX - 2} y={sLabelY - 9} width={labelW + 4} height={12} rx={2} fill="#111" opacity={0.88} />
         <circle cx={sLabelX + 6} cy={sLabelY - 3} r={2.5} fill={dotColor} />
@@ -107,7 +107,7 @@ export function PixelCharacter({ name, shirtColor, pantsColor, x, y, state, isAc
       {/* Head */}
       <rect x={cx - 13} y={headY}  width={headW}  height={headH}  rx={2} fill="#f0c896" />
       {/* Hair */}
-      <rect x={cx - 13} y={headY}  width={headW}  height={hairH}  rx={2} fill="#2a1a0a" />
+      <rect x={cx - 13} y={headY}  width={headW}  height={hairH}  rx={2} fill="#000000" />
       {/* Eyes */}
       <rect x={cx - 8}  y={headY + hairH + 4} width={4} height={4} fill="#1a1a1a" />
       <rect x={cx + 4}  y={headY + hairH + 4} width={4} height={4} fill="#1a1a1a" />

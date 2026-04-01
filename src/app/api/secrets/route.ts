@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runCliJson, runCliCaptureBoth, type RunCliResult } from "@/lib/openclaw";
+import { resolve } from "path";
+import { homedir, tmpdir } from "os";
 
 export const dynamic = "force-dynamic";
 
@@ -138,7 +140,16 @@ export async function POST(request: NextRequest) {
         // Apply a previously generated plan
         const args = ["secrets", "apply", "--json"];
         if (dryRun) args.push("--dry-run");
-        if (planPath) args.push("--from", planPath);
+        if (planPath) {
+          const resolvedPlan = resolve(planPath);
+          const ocHome = resolve(process.env.OPENCLAW_HOME || `${homedir()}/.openclaw`);
+          const tmp = resolve(tmpdir());
+          const allowed = [ocHome, tmp];
+          if (!allowed.some((root) => resolvedPlan.startsWith(root + "/") || resolvedPlan.startsWith(root + "\\"))) {
+            return NextResponse.json({ error: "planPath outside allowed directories" }, { status: 400 });
+          }
+          args.push("--from", resolvedPlan);
+        }
 
         const result = await runCliCaptureBoth(args, 60000);
         return NextResponse.json(toCliResponse(result), { status: result.code === 0 ? 200 : 500 });

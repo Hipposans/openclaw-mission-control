@@ -704,7 +704,7 @@ export function DashboardView() {
     tickRef.current = setInterval(() => {
       if (document.hidden) return;
       setNow(Date.now());
-    }, 1000);
+    }, 30_000);
 
     return () => {
       if (tickRef.current) clearInterval(tickRef.current);

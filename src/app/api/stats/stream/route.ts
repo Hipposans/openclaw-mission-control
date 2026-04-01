@@ -9,7 +9,7 @@ import { gatewayCall } from "@/lib/openclaw";
 export const dynamic = "force-dynamic";
 const exec = promisify(execFile);
 const STREAM_INTERVAL_MS = 5000;
-const SNAPSHOT_TTL_MS = 4000;
+const SNAPSHOT_TTL_MS = 20_000;
 
 /* ── TTL Cache ───────────────────────────────────── */
 
@@ -517,6 +517,7 @@ export async function GET() {
 
   const encoder = new TextEncoder();
   let closed = false;
+  let intervalId: ReturnType<typeof setInterval> | null = null;
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -537,12 +538,9 @@ export async function GET() {
         send({ error: String(err) });
       }
 
-      // Then send updates every 5 seconds
-      const interval = setInterval(async () => {
-        if (closed) {
-          clearInterval(interval);
-          return;
-        }
+      // Then send updates every STREAM_INTERVAL_MS
+      intervalId = setInterval(async () => {
+        if (closed) return;
         try {
           const snapshot = await getLatestSnapshot(home);
           send(snapshot);
@@ -550,13 +548,13 @@ export async function GET() {
           // skip this tick
         }
       }, STREAM_INTERVAL_MS);
-
-      // Cleanup when client disconnects
-      // The controller.close() or an error will set closed = true
-      // We also listen for the abort signal via the pull/cancel mechanism
     },
     cancel() {
       closed = true;
+      if (intervalId !== null) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
     },
   });
 

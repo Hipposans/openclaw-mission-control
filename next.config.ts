@@ -29,11 +29,16 @@ const nextConfig: NextConfig = {
     },
   ],
   // Ensure modules resolve from project root (avoids HOME being used as context)
-  webpack: (config, { dir }) => {
+  webpack: (config, { dev, dir }) => {
     config.resolve.modules = [
       path.join(dir, "node_modules"),
       ...(Array.isArray(config.resolve.modules) ? config.resolve.modules : ["node_modules"]),
     ];
+    // Limit HMR in-memory cache to current generation only — prevents the
+    // steady memory growth (1GB+) that webpack accumulates over long dev sessions.
+    if (dev) {
+      config.cache = { type: "memory", maxGenerations: 1 };
+    }
     return config;
   },
 };

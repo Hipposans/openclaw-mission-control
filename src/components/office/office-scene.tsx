@@ -46,7 +46,7 @@ const LEISURE_WP: Pos[] = [
 // Per-character starting offset so they spread out immediately
 const IDLE_OFFSET: Record<string, number> = {
   quan: 0, jerry: 2, kicko: 4, david: 6, hippo: 8,
-  jan: 1, krister: 3, tony: 5,
+  jan: 1, krister: 3, tony: 5, martin: 7,
 };
 
 function leisureWp(charId: string, idx: number): Pos {
@@ -63,6 +63,7 @@ const standPos: Record<string, Pos> = {
   sales:        { x: 515, y: 168 },
   design:       { x: 705, y: 168 },
   coordinator:  { x: 885, y: 168 },
+  docs:         { x: 880, y: 320 }, // docs desk (lower-right)
   pingis_left:  { x: 314, y: 392 }, // left side of table
   pingis_right: { x: 510, y: 392 }, // right side of table
   arcade:       { x: 148, y: 392 },
@@ -293,6 +294,46 @@ function CoffeeTable({ x, y }: { x: number; y: number }) {
   );
 }
 
+function Fridge({ x, y }: { x: number; y: number }) {
+  // Blocky fridge with glass door showing colorful cans
+  const w = 44, h = 70;
+  const cans = [
+    '#e53e3e', '#dd6b20', '#d69e2e', // top row: red, orange, yellow
+    '#38a169', '#3182ce', '#805ad5', // middle: green, blue, purple
+    '#e53e3e', '#dd6b20', '#38a169', // bottom: red, orange, green
+  ];
+  return (
+    <g>
+      {/* Fridge body */}
+      <rect x={x} y={y} width={w} height={h} fill="#d0d8e0" rx={2} />
+      {/* Front face (isometric depth) */}
+      <rect x={x} y={y + h} width={w} height={8} fill="#a8b4c0" rx={1} />
+      {/* Fridge door outline */}
+      <rect x={x + 3} y={y + 4} width={w - 6} height={h - 8} fill="#b8c8d8" rx={2} />
+      {/* Glass panel — dark tinted */}
+      <rect x={x + 5} y={y + 8} width={w - 10} height={h - 16} fill="#1a2a3a" rx={1} opacity={0.85} />
+      {/* Cans — 3 columns × 3 rows */}
+      {cans.map((color, i) => {
+        const col = i % 3;
+        const row = Math.floor(i / 3);
+        const cx = x + 9 + col * 10;
+        const cy = y + 14 + row * 14;
+        return (
+          <g key={i}>
+            <rect x={cx} y={cy} width={8} height={11} rx={2} fill={color} />
+            {/* Highlight on top of can */}
+            <rect x={cx + 1} y={cy + 1} width={6} height={3} rx={1} fill="white" opacity={0.3} />
+          </g>
+        );
+      })}
+      {/* Door handle */}
+      <rect x={x + w - 6} y={y + h / 2 - 8} width={3} height={16} rx={1} fill="#888" />
+      {/* Label */}
+      <text x={x + w / 2} y={y + h + 14} fontSize={8} fontFamily="monospace" fill="#555" textAnchor="middle">FRIDGE</text>
+    </g>
+  );
+}
+
 function StairsBlock({ x, y }: { x: number; y: number }) {
   return (
     <g>
@@ -329,7 +370,11 @@ function StaticScene() {
       <Plant x={218} y={68} />
       <Plant x={788} y={68} />
       {/* Bulletin board in open floor area */}
-      <BulletinBoard x={820} y={370} />
+      <BulletinBoard x={700} y={370} />
+      {/* Fridge full of sodas and beers */}
+      <Fridge x={590} y={360} />
+      {/* Docs desk — lower right */}
+      <Desk x={820} y={260} label="DOCS" />
       {/* Leisure area */}
       <ArcadeMachine x={118} y={316} />
       <PingPongTable x={338} y={346} />
@@ -355,21 +400,26 @@ const AGENT_ID_TO_CHAR: Record<string, string> = {
   'website':           'jerry',
   'coord':             'hippo',
   'security-sentinel': 'anton',
+  'docs':              'tony',
+  'sales':             'martin',
   // by lowercased agent name (fallback)
   'backend agent':     'quan',
   'app agent':         'jerry',
   'website agent':     'jerry',
   'coordinator':       'hippo',
   'security sentinel': 'anton',
+  'docs agent':        'tony',
+  'sales agent':       'martin',
   // direct name match (future-proof)
   'quan': 'quan', 'jerry': 'jerry', 'kicko': 'kicko',
-  'david': 'david', 'hippo': 'hippo', 'anton': 'anton',
+  'david': 'david', 'hippo': 'hippo', 'anton': 'anton', 'tony': 'tony',
+  'martin': 'martin',
 };
 
 // Work station for each char (single primary station)
 const PRIMARY_STATION: Record<string, string> = {
   quan: 'backend', jerry: 'appWebsite', kicko: 'sales',
-  david: 'design', hippo: 'coordinator',
+  david: 'design', hippo: 'coordinator', tony: 'docs', martin: 'sales',
 };
 
 // ─── Main scene ───────────────────────────────────────────────────────────────
@@ -514,9 +564,11 @@ export function OfficeScene() {
     const leisureTimers = leisureChars.map(([charId, keys], i) => {
       let idx = 0;
       return setInterval(() => {
-        idx = (idx + 1) % keys.length;
-        const sp = standPos[keys[idx]];
-        if (sp) targetsRef.current = { ...targetsRef.current, [charId]: { ...sp } };
+        if (!activeRef.current.has(charId)) {
+          idx = (idx + 1) % keys.length;
+          const sp = standPos[keys[idx]];
+          if (sp) targetsRef.current = { ...targetsRef.current, [charId]: { ...sp } };
+        }
       }, 6000 + i * 800);
     });
 

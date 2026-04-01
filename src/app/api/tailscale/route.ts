@@ -18,8 +18,6 @@ type TailscaleStatusJson = {
 };
 
 const RUNTIME_ACTIONS: Record<string, string[]> = {
-  up: ["up"],
-  down: ["down"],
   logout: ["logout"],
   "serve-reset": ["serve", "reset"],
   "funnel-reset": ["funnel", "reset"],
@@ -173,10 +171,17 @@ export async function POST(req: Request) {
     }
 
     if (action === "run") {
+      const ALLOWED_SUBCOMMANDS = ["status", "ip", "ping", "dns", "netcheck", "version"];
       const args = normalizeRunArgs((body as { args?: unknown }).args);
       if (args.length === 0) {
         return NextResponse.json(
           { ok: false, error: "args[] is required for action=run" },
+          { status: 400 }
+        );
+      }
+      if (!ALLOWED_SUBCOMMANDS.includes(args[0])) {
+        return NextResponse.json(
+          { ok: false, error: `Subcommand not allowed: ${args[0]}` },
           { status: 400 }
         );
       }

@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
       const allOutput: string[] = [];
 
       const child = spawn(bin, config.args, {
-        env: { ...process.env, NO_COLOR: "1", OPENCLAW_ALLOW_INSECURE_PRIVATE_WS: "1" },
+        env: { ...process.env, NO_COLOR: "1" },
         timeout: config.timeout,
         stdio: ["pipe", "pipe", "pipe"],
       });

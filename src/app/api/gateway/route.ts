@@ -93,7 +93,7 @@ async function runGatewayServiceCommand(
   const bin = await getOpenClawBin();
   return exec(bin, ["gateway", subcommand], {
     timeout,
-    env: { ...process.env, NO_COLOR: "1", OPENCLAW_ALLOW_INSECURE_PRIVATE_WS: "1" },
+    env: { ...process.env, NO_COLOR: "1" },
   });
 }
 
@@ -125,7 +125,7 @@ type GatewayPayload = {
   gatewayStatus?: Record<string, unknown>;
 };
 
-const GATEWAY_RESPONSE_TTL_MS = 2500;
+const GATEWAY_RESPONSE_TTL_MS = 5000;
 const GATEWAY_MAX_STALE_MS = 60000;
 let gatewayResponseCache: { payload: GatewayPayload; expiresAt: number; fetchedAt: number } | null = null;
 let gatewayResponseInFlight: Promise<GatewayPayload> | null = null;
