@@ -1,5 +1,6 @@
 import { runOpenResponsesText, guessMime } from "@/lib/openresponses";
 import { getGatewayUrl, getGatewayToken } from "@/lib/paths";
+import { getDeviceOperatorToken } from "@/lib/gateway-rpc";
 import { waitForResponsesEndpoint, triggerResponsesEndpointSetup } from "@/app/api/gateway/route";
 
 /**
@@ -191,7 +192,9 @@ async function tryStreamingResponse(
     "x-openclaw-agent-id": agentId,
   };
   if (sessionKey) headers["x-openclaw-session-key"] = sessionKey;
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  // Prefer device auth token (has operator.write scope) over simple gateway token.
+  const authToken = getDeviceOperatorToken() || token;
+  if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
 
   const orBody: Record<string, unknown> = {
     model: `openclaw:${agentId}`,

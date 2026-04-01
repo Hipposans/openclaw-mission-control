@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { open, readFile, stat } from "fs/promises";
+import { open, readFile, readdir, stat } from "fs/promises";
 import { join } from "path";
 import { getOpenClawHome } from "@/lib/paths";
 
@@ -36,6 +36,42 @@ const STRUCTURED_RE =
 const TS_ONLY_RE =
   /^(\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2}))\s+(.*)/;
 
+// Time-only structured line (no date): HH:mm:ss±HH:mm [source] message
+// Used in watchdog-created gateway-crash-*.log files which omit the date.
+const TIME_STRUCTURED_RE =
+  /^(\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2})\s+\[([^\]]+)\]\s+(.*)/;
+
+/** Extract YYYY-MM-DD date string from a gateway-crash-YYYYMMDD-HHMM.log filename. */
+function dateFromCrashFilename(filePath: string): string | null {
+  const m = filePath.match(/gateway-crash-(\d{4})(\d{2})(\d{2})-\d{4}\.log$/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
+/** Strip ANSI color/control escape codes from a string. */
+function stripAnsi(str: string): string {
+  // eslint-disable-next-line no-control-regex
+  return str.replace(/\x1B\[[0-9;]*[A-Za-z]/g, "");
+}
+
+/**
+ * Find the most-recent gateway-crash-*.log files in OPENCLAW_HOME.
+ * These are created by the watchdog on each gateway restart and contain
+ * the gateway's stderr (which is where structured log output goes).
+ */
+async function findCrashLogs(maxFiles = 5): Promise<string[]> {
+  try {
+    const entries = await readdir(OPENCLAW_HOME);
+    const crashLogs = entries
+      .filter((f) => /^gateway-crash-\d{8}-\d{4}\.log$/.test(f))
+      .map((f) => join(OPENCLAW_HOME, f));
+    // Filenames embed timestamps — sort descending so newest are first
+    crashLogs.sort((a, b) => b.localeCompare(a));
+    return crashLogs.slice(0, maxFiles);
+  } catch {
+    return [];
+  }
+}
+
 /** Parse an ISO timestamp to UTC millis. Returns 0 on failure. */
 function tsToMs(ts: string): number {
   if (!ts) return 0;
@@ -52,55 +88,54 @@ function tsToMs(ts: string): number {
  * Handles:
  *   1. Structured lines: `TIMESTAMP [SOURCE] MESSAGE`
  *   2. Timestamp-only lines: `TIMESTAMP MESSAGE` (no source tag)
- *   3. Continuation lines: no timestamp — appended to previous entry
+ *   3. Time-only structured lines: `HH:mm:ss±TZ [SOURCE] MESSAGE` (gateway-crash logs)
+ *   4. Continuation lines: no timestamp — appended to previous entry
+ *
+ * @param fileDate YYYY-MM-DD date to prepend to time-only timestamps (from filename)
  */
 function parseLines(
   lines: string[],
-  fileLevel: "info" | "error"
+  fileLevel: "info" | "error",
+  fileDate?: string,
 ): LogEntry[] {
   const entries: LogEntry[] = [];
 
   for (let i = 0; i < lines.length; i++) {
-    const raw = lines[i];
+    const raw = stripAnsi(lines[i]);
     if (!raw) continue;
 
-    // Try structured: TIMESTAMP [source] message
+    // Try full structured: TIMESTAMP [source] message
     const structMatch = raw.match(STRUCTURED_RE);
     if (structMatch) {
       const time = structMatch[1];
       const source = structMatch[2];
       const message = structMatch[3];
       const level = detectLevel(message, fileLevel);
-      entries.push({
-        line: i,
-        time,
-        timeMs: tsToMs(time),
-        source,
-        level,
-        message,
-        raw,
-      });
+      entries.push({ line: i, time, timeMs: tsToMs(time), source, level, message, raw });
       continue;
     }
 
-    // Try timestamp-only: TIMESTAMP message (no [source] tag)
+    // Try timestamp-only (full date): TIMESTAMP message (no [source] tag)
     const tsMatch = raw.match(TS_ONLY_RE);
     if (tsMatch) {
       const time = tsMatch[1];
       const message = tsMatch[2];
       const level = detectLevel(message, fileLevel);
-      // Infer source: error log lines without tags are system-level;
-      // gateway.log lines without tags are agent output
       const source = fileLevel === "error" ? "system" : "agent";
-      entries.push({
-        line: i,
-        time,
-        timeMs: tsToMs(time),
-        source,
-        level,
-        message,
-        raw,
-      });
+      entries.push({ line: i, time, timeMs: tsToMs(time), source, level, message, raw });
+      continue;
+    }
+
+    // Try time-only structured: HH:mm:ss±TZ [source] message (gateway-crash-*.log format)
+    const timeStructMatch = raw.match(TIME_STRUCTURED_RE);
+    if (timeStructMatch) {
+      const timePart = timeStructMatch[1];
+      const source = timeStructMatch[2];
+      const message = timeStructMatch[3];
+      const level = detectLevel(message, fileLevel);
+      // Construct full ISO timestamp using the date from the filename
+      const time = fileDate ? `${fileDate}T${timePart}` : timePart;
+      entries.push({ line: i, time, timeMs: tsToMs(time), source, level, message, raw });
       continue;
     }
 
@@ -149,6 +184,13 @@ export async function GET(request: NextRequest) {
         path: join(LOGS_DIR, "gateway.err.log"),
         level: "error",
       });
+      // Scan for watchdog-created crash logs (gateway-crash-YYYYMMDD-HHMM.log)
+      // These live at the openclaw home root and are the primary log source until
+      // gateway.log/gateway.err.log are configured.
+      const crashLogs = await findCrashLogs(5);
+      for (const p of crashLogs) {
+        files.push({ path: p, level: "error" });
+      }
     }
 
     const fileResults = await Promise.all(
@@ -178,10 +220,11 @@ export async function GET(request: NextRequest) {
           }
 
           const lines = content.split("\n");
+          const fileDate = dateFromCrashFilename(file.path) ?? undefined;
           return {
             path: file.path,
             size: s.size,
-            entries: parseLines(lines, file.level),
+            entries: parseLines(lines, file.level, fileDate),
           };
         } catch {
           return {

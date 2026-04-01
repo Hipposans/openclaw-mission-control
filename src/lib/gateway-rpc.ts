@@ -156,6 +156,16 @@ function loadDeviceAuthTokens(): DeviceAuthTokens | null {
   return null;
 }
 
+/**
+ * Returns the device operator token from identity/device-auth.json.
+ * This token has operator.write scope and should be preferred over the
+ * simple GATEWAY_AUTH_TOKEN for HTTP requests that require write access.
+ */
+export function getDeviceOperatorToken(): string | null {
+  const authTokens = loadDeviceAuthTokens();
+  return authTokens?.operator?.token ?? null;
+}
+
 // ──────────────────────────────────────────────────
 
 export class GatewayRpcError extends Error {

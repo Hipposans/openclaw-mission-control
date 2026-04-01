@@ -67,6 +67,7 @@ export async function POST(request: NextRequest) {
         env: { ...process.env, NO_COLOR: "1" },
         timeout: config.timeout,
         stdio: ["pipe", "pipe", "pipe"],
+        shell: process.platform === "win32",
       });
 
       activeChild = child;
